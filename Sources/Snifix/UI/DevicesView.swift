@@ -5,7 +5,7 @@ import SnifixCore
 
 struct DevicesView: View {
     @Environment(AppModel.self) private var model
-    @UIState private var tab = DeviceTab.iphone
+    @UIState private var tab = DeviceTab(rawValue: ProcessInfo.processInfo.environment["SNIFIX_SNAPSHOT_DEVICE_TAB"] ?? "") ?? .iphone
 
     enum DeviceTab: String, CaseIterable, Identifiable {
         case mac = "Mac", iphone = "iPhone", android = "Android"
@@ -150,12 +150,12 @@ struct IPhoneCard: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("When to Capture").font(.system(size: 13, weight: .medium))
                 Picker("", selection: Binding(get: { model.settings.iPhoneMode }, set: { model.settings.iPhoneMode = $0 })) {
-                    Text("Only while the iPhone is connected by USB").tag(ProxySettings.IPhoneMode.usbOnly)
-                    Text("Always while Snifix is running").tag(ProxySettings.IPhoneMode.always)
+                    Text("Always while Snifix is running (over Wi-Fi, no cable needed)").tag(ProxySettings.IPhoneMode.always)
+                    Text("Only while an iPhone is connected to this Mac by USB").tag(ProxySettings.IPhoneMode.usbOnly)
                     Text("Never").tag(ProxySettings.IPhoneMode.off)
                 }
                 .pickerStyle(.radioGroup).labelsHidden()
-                Text("Set “Automatic” once. When Snifix is closed, the Mac is off or the cable is unplugged (USB mode), the iPhone goes online directly. iOS caches the setting, so switching can take up to a minute.")
+                Text("Set “Automatic” once — the iPhone works over Wi-Fi. When Snifix is closed or the Mac is off, the iPhone goes online directly. iOS caches the setting, so switching can take up to a minute. Applies to every phone that uses the PAC address.")
                     .font(.system(size: 11)).foregroundStyle(.secondary)
             }
         }
@@ -176,6 +176,24 @@ struct AndroidCard: View {
                     get: { model.settings.androidAutoConnect }, set: { model.settings.androidAutoConnect = $0 }))
                     .toggleStyle(.switch).font(.system(size: 12))
             }
+            Text("Over Wi-Fi").font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.gold)
+            HStack(alignment: .top, spacing: 18) {
+                QRCode(text: model.certificatePageURL)
+                    .frame(width: 120, height: 120)
+                    .padding(7)
+                    .background(RoundedRectangle(cornerRadius: 12).fill(.white))
+                VStack(alignment: .leading, spacing: 9) {
+                    StepRow(number: 1, text: "Phone and Mac are on the same Wi-Fi network.")
+                    StepRow(number: 2, text: "Wi-Fi → your network → ✎ / Advanced → **Proxy → Proxy Auto-Config**, PAC URL:")
+                    CopyField(text: model.pacURLByIP)
+                    Text("Or **Manual**: host \(model.localAddress), port \(String(model.settings.port)) — then switch it back to None when Snifix is not running.")
+                        .font(.system(size: 10.5)).foregroundStyle(.secondary).textSelection(.enabled)
+                    StepRow(number: 3, text: "Scan the QR code (or open **http://snifix.cert** in Chrome on the phone) and download the certificate. Then Settings → Security → Encryption & credentials → **Install a certificate → CA certificate**.")
+                    StepRow(number: 4, text: "Android 7+ trusts user certificates only if the app allows it (`network_security_config`). Ask the developers to add `<certificates src=\"user\"/>` to the QA build.")
+                }
+            }
+            Divider()
+            Text("Over USB Cable").font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.gold)
             if model.android.adb == nil {
                 Label("adb not found. Install it: brew install android-platform-tools", systemImage: "exclamationmark.triangle.fill")
                     .foregroundStyle(Theme.amber).font(.system(size: 12))
@@ -216,9 +234,8 @@ struct AndroidCard: View {
             }
             Divider()
             VStack(alignment: .leading, spacing: 8) {
-                StepRow(number: 1, text: "Turn on **USB debugging** and plug in the cable — Snifix routes the phone's traffic through the cable (the Wi-Fi network does not matter).")
+                StepRow(number: 1, text: "Turn on **USB debugging** and plug in the cable — Snifix routes the phone's traffic through the cable, the Wi-Fi network does not matter. Handy when the phone and the Mac are on different networks.")
                 StepRow(number: 2, text: "Click Send Certificate, then on the phone: Security → Encryption & credentials → **Install a certificate → CA certificate** → Snifix-CA.crt.")
-                StepRow(number: 3, text: "Android 7+ trusts user certificates only if the app allows it (`network_security_config`). Ask the developers to add `<certificates src=\"user\"/>` to the QA build.")
             }
             Label("Click Disconnect before unplugging the cable — otherwise the phone keeps the 127.0.0.1 proxy and has no internet until you plug it into the Mac again (Snifix removes the proxy itself when it quits).",
                   systemImage: "info.circle")

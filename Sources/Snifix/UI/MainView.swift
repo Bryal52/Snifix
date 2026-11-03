@@ -43,6 +43,9 @@ struct MainView: View {
             }
         }
         .toolbar { MainToolbar() }
+        .sheet(isPresented: Binding(get: { model.showDonate }, set: { model.showDonate = $0 })) {
+            DonateView().environment(model).tint(Theme.gold)
+        }
         .searchable(text: $model.search, placement: .toolbar, prompt: "Filter: URL, method, status")
         .navigationTitle("Snifix")
         .navigationSubtitle(model.recording ? "Recording · \(model.rows.count)" : "Paused · \(model.rows.count)")
@@ -292,6 +295,7 @@ struct StatusBar: View {
             Sparkline(values: model.flowsPerSecond).frame(width: 90, height: 14)
             Text("\(model.visibleRows.count) of \(model.rows.count)").monospacedDigit()
                 .contentTransition(.numericText())
+            DonateButton(isPresented: Binding(get: { model.showDonate }, set: { model.showDonate = $0 }))
         }
         .font(.system(size: 11))
         .foregroundStyle(.secondary)

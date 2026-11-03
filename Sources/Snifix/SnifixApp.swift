@@ -47,6 +47,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
                 // Only the look of the button: the Mac's network settings stay untouched
                 if env["SNIFIX_SNAPSHOT_PROXY_ON"] != nil { model.systemProxyEnabled = true }
+                if env["SNIFIX_SNAPSHOT_DONATE"] != nil { model.showDonate = true }
                 for id in (env["SNIFIX_SNAPSHOT_WINDOWS"] ?? "").split(separator: ",") {
                     BreakpointWindowOpener.openWindow?(String(id))
                 }

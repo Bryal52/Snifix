@@ -285,6 +285,7 @@ final class AppModel {
     var deviceProfiles: [String: DeviceProfile] = [:] {
         didSet { save(deviceProfiles, "devices.json"); rebuildSummaries() }
     }
+    var showDonate = false
     var breakpoints: [PendingBreakpoint] = []
     var scriptLog: [String] = []
     var toast: Toast?

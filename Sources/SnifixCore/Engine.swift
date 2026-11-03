@@ -11,7 +11,8 @@ public struct ProxySettings: Codable, Sendable, Equatable {
     /// Hosts whose clients reject the Snifix certificate are tunneled afterwards, so the app keeps working.
     public var autoBypassPinned = true
     public var enableSystemProxyOnLaunch = true
-    public var iPhoneMode: IPhoneMode = .usbOnly
+    /// Phones that use the PAC address: over Wi-Fi always by default, or only while an iPhone is on USB.
+    public var iPhoneMode: IPhoneMode = .always
     public var androidAutoConnect = true
     public var maxFlows = 20000
     /// HTTP/2 with clients and servers (ALPN); off means HTTP/1.1 everywhere.
