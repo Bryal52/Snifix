@@ -306,6 +306,13 @@ struct StatusBar: View {
 
 // MARK: - Sidebar
 
+extension View {
+    /// Makes the whole row clickable, not only the disclosure arrow.
+    func rowTap(_ action: @escaping () -> Void) -> some View {
+        contentShape(Rectangle()).onTapGesture(perform: action)
+    }
+}
+
 struct DeviceIconView: View {
     let icon: DeviceIcon
     let autoSymbol: String
@@ -364,6 +371,7 @@ struct SidebarView: View {
     @Environment(AppModel.self) private var model
     @AppStorage("sidebarExpanded") private var expandedRaw = "Mac|Mac/apps"
     @UIState private var renaming: SidebarDevice?
+    @UIState private var headerHover = false
     @UIState private var renameText = ""
 
     var body: some View {
@@ -404,20 +412,24 @@ struct SidebarView: View {
                             ForEach(device.apps) { app in appRow(device, app) }
                         } label: {
                             groupLabel("Apps", "square.grid.2x2", device.apps.count)
+                                .rowTap { toggle(device.key + "/apps") }
                         }
                         DisclosureGroup(isExpanded: expanded(device.key + "/hosts")) {
                             ForEach(device.hosts) { h in hostRow(h, tag: .deviceHost(device.key, h.name)) }
                         } label: {
                             groupLabel("Domains", "globe", device.hosts.count)
+                                .rowTap { toggle(device.key + "/hosts") }
                         }
                     } label: {
                         deviceRow(device).tag(SidebarItem.device(device.key))
+                            .rowTap { activate(.device(device.key), expanding: device.key, also: device.key + "/apps") }
                     }
                 }
             } header: {
                 HStack {
                     Text("Devices")
                     Spacer()
+                    // Like the system's section chevrons: visible only while the pointer is over the header
                     Menu {
                         Picker("Sort", selection: $model.sidebarSort) {
                             ForEach(SidebarSort.allCases) { Text($0.rawValue).tag($0) }
@@ -433,7 +445,10 @@ struct SidebarView: View {
                     .menuIndicator(.hidden)
                     .fixedSize()
                     .help("Sort: \(model.sidebarSort.rawValue)")
+                    .opacity(headerHover ? 1 : 0)
                 }
+                .contentShape(Rectangle())
+                .onHover { h in withAnimation(.easeInOut(duration: 0.18)) { headerHover = h } }
             }
         }
         .listStyle(.sidebar)
@@ -461,7 +476,6 @@ struct SidebarView: View {
                 .frame(width: 18)
             HStack(spacing: 5) {
                 Text(d.name).font(.system(size: 12.5, weight: .semibold)).lineLimit(1)
-                    .onTapGesture(count: 2) { startRename(d) }
                 if d.pinned {
                     Image(systemName: "pin.fill").font(.system(size: 8)).foregroundStyle(Theme.gold)
                         .transition(.scale.combined(with: .opacity))
@@ -516,6 +530,7 @@ struct SidebarView: View {
                 countBadge(app.count)
             }
             .tag(SidebarItem.deviceApp(d.key, app.name))
+            .rowTap { activate(.deviceApp(d.key, app.name), expanding: d.key + "/app/" + app.name) }
             .contextMenu {
                 Button(model.pinnedApps.contains(app.name) ? "Unpin" : "Pin") {
                     withAnimation {
@@ -588,6 +603,23 @@ struct SidebarView: View {
         var set = expandedSet
         if on { set.insert(key) } else { set.remove(key) }
         expandedRaw = set.sorted().joined(separator: "|")
+    }
+
+    /// First click selects and opens the row, a click on the already selected row closes it.
+    private func activate(_ item: SidebarItem, expanding key: String, also extra: String? = nil) {
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+            if model.sidebar == item {
+                setExpanded(key, !expandedSet.contains(key))
+            } else {
+                model.sidebar = item
+                setExpanded(key, true)
+                if let extra, !expandedSet.contains(extra) { setExpanded(extra, true) }
+            }
+        }
+    }
+
+    private func toggle(_ key: String) {
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { setExpanded(key, !expandedSet.contains(key)) }
     }
 
     private func expandAll(_ on: Bool) {
