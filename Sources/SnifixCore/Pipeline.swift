@@ -4,15 +4,39 @@ import NIOPosix
 import NIOHTTP1
 import NIOSSL
 import NIOTLS
+import NIOHTTP2
 
 enum ProxyPipeline {
     /// HTTP server handlers for a client connection: the proxy port itself or a decrypted tunnel.
     static func installHTTP(on channel: Channel, engine: ProxyEngine, scheme: String,
-                            target: (host: String, port: Int)?, client: ClientInfo) throws {
+                            target: (host: String, port: Int)?, client: ClientInfo, pool: UpstreamPool? = nil) throws {
         let ops = channel.pipeline.syncOperations
         try ops.addHandler(HTTPResponseEncoder(configuration: .manualFraming), name: "http-enc")
         try ops.addHandler(ByteToMessageHandler(HTTPRequestDecoder(leftOverBytesStrategy: .forwardBytes)), name: "http-dec")
-        try ops.addHandler(ExchangeHandler(engine: engine, scheme: scheme, target: target, client: client), name: "exchange")
+        try ops.addHandler(ExchangeHandler(engine: engine, scheme: scheme, target: target, client: client, pool: pool), name: "exchange")
+    }
+
+    /// Decrypted tunnel: after the TLS handshake the client picks HTTP/2 or HTTP/1.1 (ALPN).
+    static func installNegotiated(on channel: Channel, engine: ProxyEngine, target: (host: String, port: Int), client: ClientInfo) throws {
+        // Requests of one tunnel share upstream connections, also across HTTP/2 streams
+        let pool = UpstreamPool(eventLoop: channel.eventLoop, engine: engine)
+        channel.closeFuture.whenComplete { _ in pool.closeAll() }
+        try channel.pipeline.syncOperations.addHandler(ApplicationProtocolNegotiationHandler { alpn, channel in
+            if case .negotiated("h2") = alpn {
+                return channel.configureHTTP2Pipeline(mode: .server, initialLocalSettings: h2Settings,
+                                                      targetWindowSize: h2WindowSize, inboundStreamInitializer: { stream in
+                    stream.eventLoop.makeCompletedFuture {
+                        let ops = stream.pipeline.syncOperations
+                        try ops.addHandler(HTTP2FramePayloadToHTTP1ServerCodec())
+                        try ops.addHandler(ExchangeHandler(engine: engine, scheme: "https", target: target, client: client,
+                                                           pool: pool, http2: true))
+                    }
+                }).map { _ in }
+            }
+            return channel.eventLoop.makeCompletedFuture {
+                try installHTTP(on: channel, engine: engine, scheme: "https", target: target, client: client, pool: pool)
+            }
+        })
     }
 }
 
@@ -31,20 +55,25 @@ final class ExchangeHandler: ChannelInboundHandler, RemovableChannelHandler {
     private var busy = false
     private var context: ChannelHandlerContext?
     private var pool: UpstreamPool?
+    private let ownsPool: Bool
+    /// One HTTP/2 stream: no Connection headers, no CONNECT or upgrades.
+    private let http2: Bool
 
-    init(engine: ProxyEngine, scheme: String, target: (host: String, port: Int)?, client: ClientInfo) {
+    init(engine: ProxyEngine, scheme: String, target: (host: String, port: Int)?, client: ClientInfo,
+         pool: UpstreamPool? = nil, http2: Bool = false) {
         self.engine = engine; self.scheme = scheme; self.target = target; self.client = client
+        self.pool = pool; ownsPool = pool == nil; self.http2 = http2
     }
 
     func handlerAdded(context: ChannelHandlerContext) {
         self.context = context
-        pool = UpstreamPool(eventLoop: context.eventLoop, engine: engine)
+        if pool == nil { pool = UpstreamPool(eventLoop: context.eventLoop, engine: engine) }
     }
 
     func handlerRemoved(context: ChannelHandlerContext) { self.context = nil }
 
     func channelInactive(context: ChannelHandlerContext) {
-        pool?.closeAll()
+        if ownsPool { pool?.closeAll() }
         context.fireChannelInactive()
     }
 
@@ -57,7 +86,7 @@ final class ExchangeHandler: ChannelInboundHandler, RemovableChannelHandler {
         case .head(let h):
             head = h
             body.clear()
-            if h.headers[canonicalForm: "expect"].contains(where: { $0.lowercased() == "100-continue" }) {
+            if !http2 && h.headers[canonicalForm: "expect"].contains(where: { $0.lowercased() == "100-continue" }) {
                 context.writeAndFlush(wrapOutboundOut(.head(HTTPResponseHead(version: h.version, status: .continue))), promise: nil)
             }
         case .body(var chunk):
@@ -119,7 +148,7 @@ final class ExchangeHandler: ChannelInboundHandler, RemovableChannelHandler {
         }
         if let h = target?.host, request.host != h { request.host = h }
 
-        if head.headers[canonicalForm: "upgrade"].contains(where: { $0.lowercased() == "websocket" }) {
+        if !http2 && head.headers[canonicalForm: "upgrade"].contains(where: { $0.lowercased() == "websocket" }) {
             WebSocketBridge.start(context: context, head: head, request: request, engine: engine, client: client,
                                   isSSL: scheme == "https")
             return eventLoop.makeSucceededVoidFuture()
@@ -150,8 +179,10 @@ final class ExchangeHandler: ChannelInboundHandler, RemovableChannelHandler {
         let data = Data(body.readableBytesView)
         let method = head.method.rawValue
         if let target {
-            return RequestData(method: method, scheme: scheme, host: target.host, port: target.port,
-                               path: head.uri, headers: headers, body: data)
+            var r = RequestData(method: method, scheme: scheme, host: target.host, port: target.port,
+                                path: head.uri, headers: headers, body: data)
+            if head.version.major == 2 { r.version = "HTTP/2" }
+            return r
         }
         if head.uri.hasPrefix("/") {
             // Origin-form request sent straight to the proxy port (cert page, PAC file)
@@ -178,14 +209,19 @@ final class ExchangeHandler: ChannelInboundHandler, RemovableChannelHandler {
         } else if !noBody {
             headers.replaceOrAdd(name: "Content-Length", value: "\(response.body.count)")
         }
-        let keepAlive = head.isKeepAlive && !close
+        let keepAlive = http2 || (head.isKeepAlive && !close)
         if !keepAlive { headers.replaceOrAdd(name: "Connection", value: "close") }
         let status = HTTPResponseStatus(statusCode: response.statusCode, reasonPhrase: response.reason)
-        context.write(wrapOutboundOut(.head(HTTPResponseHead(version: .http1_1, status: status, headers: headers))), promise: nil)
+        context.write(wrapOutboundOut(.head(HTTPResponseHead(version: head.version, status: status, headers: headers))), promise: nil)
         if !noBody && !response.body.isEmpty {
             context.write(wrapOutboundOut(.body(.byteBuffer(ByteBuffer(bytes: response.body)))), promise: nil)
         }
-        let done = context.writeAndFlush(wrapOutboundOut(.end(nil)))
+        // Trailers only exist for HTTP/2 clients here: HTTP/1.1 responses are sent with Content-Length
+        var trailers: HTTPHeaders?
+        if http2, let t = response.trailers, !t.isEmpty {
+            trailers = HTTPHeaders(t.map { ($0.name, $0.value) })
+        }
+        let done = context.writeAndFlush(wrapOutboundOut(.end(trailers)))
         if !keepAlive { done.whenComplete { _ in context.close(promise: nil) } }
         return done
     }
@@ -218,12 +254,11 @@ final class TunnelSniffer: ChannelInboundHandler, RemovableChannelHandler {
         let isTLS = first == 0x16
         if isTLS && engine.shouldDecrypt(host: host) {
             do {
-                let ssl = NIOSSLServerHandler(context: try engine.ca.serverContext(for: host))
+                let ssl = NIOSSLServerHandler(context: try engine.ca.serverContext(for: host, http2: engine.settings.http2))
                 let observer = HandshakeObserver(engine: engine, host: host, port: port, client: client)
                 try context.pipeline.syncOperations.addHandler(ssl, position: .after(self))
                 try context.pipeline.syncOperations.addHandler(observer, position: .after(ssl))
-                try ProxyPipeline.installHTTP(on: channel, engine: engine, scheme: "https",
-                                              target: (host, port), client: client)
+                try ProxyPipeline.installNegotiated(on: channel, engine: engine, target: (host, port), client: client)
             } catch {
                 context.close(promise: nil)
                 return

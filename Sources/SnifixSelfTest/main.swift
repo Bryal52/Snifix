@@ -70,6 +70,24 @@ check("Страница сертификата", out.contains("BEGIN CERTIFICATE
 (out, _) = curl(["http://127.0.0.1:19090/proxy.pac"])
 check("PAC файл", out.contains("FindProxyForURL"), out)
 
+// HTTP/2: client ↔ Snifix and Snifix ↔ server
+(out, code) = curl(["--http2", "-o", "/dev/null", "-w", "%{http_version}", "https://www.google.com/"])
+check("HTTP/2 от клиента до Snifix", code == 0 && out.hasSuffix("2"), out)
+(out, code) = curl(["--http1.1", "-o", "/dev/null", "-w", "%{http_version}", "https://www.cloudflare.com/"])
+check("HTTP/1.1 клиент к HTTP/2 серверу", code == 0 && out.hasSuffix("1.1"), out)
+(out, code) = curl(["--http2", "-X", "POST", "-H", "Content-Type: application/json", "-d", #"{"pin":"1234"}"#, "https://httpbin.org/post"])
+check("HTTP/2 POST с телом", code == 0 && out.contains("\"pin\": \"1234\""), String(out.prefix(300)))
+(out, code) = curl(["--http2", "-o", "/dev/null", "-w", "%{size_download}", "https://speed.cloudflare.com/__down?bytes=2000000"])
+check("HTTP/2 загрузка 2 МБ", code == 0 && out.hasSuffix("2000000"), out)
+let parallelURLs = (1...6).map { "https://www.google.com/robots.txt?n=\($0)" }
+(out, code) = curl(["--http2", "--parallel", "--parallel-max", "6", "-o", "/dev/null", "-o", "/dev/null", "-o", "/dev/null",
+                    "-o", "/dev/null", "-o", "/dev/null", "-o", "/dev/null", "-w", "%{http_code} "] + parallelURLs)
+check("6 параллельных запросов по HTTP/2", code == 0 && out.components(separatedBy: "200").count == 7, out)
+Thread.sleep(forTimeInterval: 0.3)
+let h2Flows = sink.lock.withLock { sink.flows.values.filter { $0.response?.version == "HTTP/2" } }
+check("Ответы серверов по HTTP/2", h2Flows.count >= 7, "\(h2Flows.count)")
+check("Запрос клиента записан как HTTP/2", sink.lock.withLock { sink.flows.values.contains { $0.request.version == "HTTP/2" } })
+
 // WebSocket through the proxy: URLSession tunnels via CONNECT, Snifix decrypts and relays frames
 final class TrustCA: NSObject, URLSessionDelegate {
     let anchor: SecCertificate

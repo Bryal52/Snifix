@@ -27,6 +27,8 @@ struct FlowRow: Identifiable, Hashable {
     var isActive: Bool
     var ruleNames: String
     var errorText: String
+    /// "h2", "h1" or "h2→h1" when the client and the server use different versions.
+    var protocolName: String
 
     init(_ f: FlowData) {
         id = f.id
@@ -46,6 +48,10 @@ struct FlowRow: Identifiable, Hashable {
         deviceName = f.client.deviceName ?? (f.client.isLocal ? "Mac" : f.client.address)
         isWebSocket = f.isWebSocket
         ruleNames = f.matchedRules.joined(separator: ", ")
+        let short = { (v: String) in v.hasPrefix("HTTP/2") ? "h2" : "h1" }
+        let client = short(f.request.version)
+        let server = f.response.map { short($0.version) } ?? client
+        protocolName = f.request.method == "CONNECT" ? "tcp" : f.isWebSocket ? "ws" : client == server ? client : "\(client)→\(server)"
         errorText = ""
         isFailed = false; isPaused = false; isTunnel = false; isActive = false
         switch f.state {

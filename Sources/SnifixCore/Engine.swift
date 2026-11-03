@@ -14,6 +14,8 @@ public struct ProxySettings: Codable, Sendable, Equatable {
     public var iPhoneMode: IPhoneMode = .usbOnly
     public var androidAutoConnect = true
     public var maxFlows = 20000
+    /// HTTP/2 with clients and servers (ALPN); off means HTTP/1.1 everywhere.
+    public var http2 = true
     public init() {}
 
     public enum IPhoneMode: String, Codable, CaseIterable, Sendable { case always, usbOnly, off }
@@ -29,6 +31,7 @@ public struct ProxySettings: Codable, Sendable, Equatable {
         iPhoneMode = try c.decodeIfPresent(IPhoneMode.self, forKey: .iPhoneMode) ?? d.iPhoneMode
         androidAutoConnect = try c.decodeIfPresent(Bool.self, forKey: .androidAutoConnect) ?? d.androidAutoConnect
         maxFlows = try c.decodeIfPresent(Int.self, forKey: .maxFlows) ?? d.maxFlows
+        http2 = try c.decodeIfPresent(Bool.self, forKey: .http2) ?? d.http2
     }
 }
 
@@ -66,7 +69,7 @@ public final class ProxyEngine: @unchecked Sendable {
     private let state: NIOLockedValueBox<(rules: RulesDocument, settings: ProxySettings, recording: Bool)>
     private let nextID = NIOLockedValueBox(1)
     private let bypassed = NIOLockedValueBox<Set<String>>([])
-    private let tlsClientContexts = NIOLockedValueBox<[Bool: NIOSSLContext]>([:])
+    private let tlsClientContexts = NIOLockedValueBox<[String: NIOSSLContext]>([:])
 
     public var breakpointHandler: (@Sendable (BreakpointEvent) async -> BreakpointDecision)?
     /// Whether /proxy.pac sends devices through Snifix (iPhone on USB, or always).
@@ -141,14 +144,15 @@ public final class ProxyEngine: @unchecked Sendable {
         rules.dnsOverrides.first { $0.enabled && hostMatches(host, [$0.host]) }?.address ?? host
     }
 
-    func clientTLSContext() throws -> NIOSSLContext {
+    func clientTLSContext(allowH2: Bool) throws -> NIOSSLContext {
         let verify = settings.verifyUpstreamCertificates
-        if let c = tlsClientContexts.withLockedValue({ $0[verify] }) { return c }
+        let key = "\(verify)|\(allowH2)"
+        if let c = tlsClientContexts.withLockedValue({ $0[key] }) { return c }
         var config = TLSConfiguration.makeClientConfiguration()
-        config.applicationProtocols = ["http/1.1"]
+        config.applicationProtocols = allowH2 ? ["h2", "http/1.1"] : ["http/1.1"]
         config.certificateVerification = verify ? .fullVerification : .none
         let c = try NIOSSLContext(configuration: config)
-        tlsClientContexts.withLockedValue { $0[verify] = c }
+        tlsClientContexts.withLockedValue { $0[key] = c }
         return c
     }
 

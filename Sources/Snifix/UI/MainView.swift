@@ -303,6 +303,11 @@ struct FlowTable: View {
                             .foregroundStyle(Theme.methodColor(r.method))
                     }
                     .width(min: 44, ideal: 60, max: 80)
+                    TableColumn("Протокол", value: \.protocolName) { r in
+                        Text(r.protocolName).font(.system(size: 10.5, weight: .medium, design: .rounded))
+                            .foregroundStyle(r.protocolName.hasPrefix("h2") ? Theme.gold : .secondary)
+                    }
+                    .width(min: 40, ideal: 56, max: 80)
                     TableColumn("Код", value: \.statusCode) { r in
                         Text(r.statusText).monospacedDigit()
                             .foregroundStyle(Theme.statusColor(r.statusCode, failed: r.isFailed))

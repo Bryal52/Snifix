@@ -69,6 +69,8 @@ public struct ResponseData: Sendable, Codable {
     public var version: String = "HTTP/1.1"
     public var headers: [HTTPHeader]
     public var body: Data
+    /// Trailing headers (gRPC status and similar), passed on to HTTP/2 clients.
+    public var trailers: [HTTPHeader]? = nil
 
     public init(statusCode: Int, reason: String? = nil, headers: [HTTPHeader], body: Data) {
         self.statusCode = statusCode

@@ -272,6 +272,8 @@ struct SettingsView: View {
                 Toggle("Проверять сертификаты серверов", isOn: bind(\.verifyUpstreamCertificates))
                 Text("Выключите для тестовых серверов с самоподписанным сертификатом.").font(.caption).foregroundStyle(.secondary)
                 Toggle("Пропускать хосты с пиннингом сертификата", isOn: bind(\.autoBypassPinned))
+                Toggle("HTTP/2 (с приложениями и серверами)", isOn: bind(\.http2))
+                Text("Выключите, если приложение или сервер плохо работает через HTTP/2 — тогда всё пойдёт по HTTP/1.1.").font(.caption).foregroundStyle(.secondary)
             }
             Section("Список") {
                 Picker("Хранить запросов", selection: bind(\.maxFlows)) {

@@ -317,6 +317,9 @@ struct SummaryView: View {
                 if let d = flow.duration { row("Длительность", formatDuration(d)) }
                 if let s = flow.responseStartedAt { row("До ответа", formatDuration(s.timeIntervalSince(flow.startedAt))) }
                 row("HTTPS", flow.isSSL ? "Да, расшифрован Snifix" : "Нет")
+                row("Протокол клиента", flow.request.version)
+                if let r = flow.response { row("Протокол сервера", r.version) }
+                if let t = flow.response?.trailers, !t.isEmpty { row("Трейлеры", t.map { "\($0.name): \($0.value)" }.joined(separator: "\n")) }
                 row("Размер запроса", formatBytes(flow.request.body.count))
                 if let r = flow.response {
                     row("Размер ответа", formatBytes(r.body.count))

@@ -25,7 +25,7 @@ enum WebSocketBridge {
             .channelInitializer { ch in
                 ch.eventLoop.makeCompletedFuture {
                     let ops = ch.pipeline.syncOperations
-                    if tls { try ops.addHandler(NIOSSLClientHandler(context: engine.clientTLSContext(), serverHostname: sni)) }
+                    if tls { try ops.addHandler(NIOSSLClientHandler(context: engine.clientTLSContext(allowH2: false), serverHostname: sni)) }
                     try ops.addHandler(HTTPRequestEncoder(configuration: .manualFraming), name: "ws-enc")
                     try ops.addHandler(ByteToMessageHandler(HTTPResponseDecoder(leftOverBytesStrategy: .forwardBytes)), name: "ws-dec")
                     try ops.addHandler(collector, name: "ws-collect")

@@ -72,15 +72,15 @@ public final class CertificateAuthority: @unchecked Sendable {
     }
 
     /// Server-side TLS context presenting a certificate for `host`, cached per host.
-    public func serverContext(for host: String) throws -> NIOSSLContext {
-        let key = host.lowercased()
+    public func serverContext(for host: String, http2: Bool) throws -> NIOSSLContext {
+        let key = host.lowercased() + (http2 ? "|h2" : "")
         if let cached = contexts.withLockedValue({ $0[key] }) { return cached }
-        let leaf = try makeLeaf(for: key)
+        let leaf = try makeLeaf(for: host.lowercased())
         var config = TLSConfiguration.makeServerConfiguration(
             certificateChain: [.certificate(leaf), .certificate(caSSLCertificate)],
             privateKey: .privateKey(leafSSLKey)
         )
-        config.applicationProtocols = ["http/1.1"]
+        config.applicationProtocols = http2 ? ["h2", "http/1.1"] : ["http/1.1"]
         let context = try NIOSSLContext(configuration: config)
         contexts.withLockedValue { $0[key] = context }
         return context
