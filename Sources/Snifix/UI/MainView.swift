@@ -127,25 +127,45 @@ struct MainToolbar: ToolbarContent {
         }
         ToolbarItemGroup(placement: .primaryAction) {
             Button { model.setSystemProxy(!model.systemProxyEnabled) } label: {
-                Label("Mac", systemImage: model.systemProxyEnabled ? "macbook.and.iphone" : "macbook")
-                    .foregroundStyle(model.systemProxyEnabled ? AnyShapeStyle(Theme.goldGradient) : AnyShapeStyle(.secondary))
+                Label(model.systemProxyEnabled ? "Mac: вкл" : "Mac: выкл",
+                      systemImage: model.systemProxyEnabled ? "macbook.and.iphone" : "macbook")
             }
-            .help(model.systemProxyEnabled ? "Перехват трафика Mac включён" : "Перехват трафика Mac выключен")
-            Button { openWindow(id: "compose") } label: { Label("Новый запрос", systemImage: "paperplane") }
-                .help("Новый запрос (⌘N)")
-            Button { openWindow(id: "rules") } label: {
+            .foregroundStyle(model.systemProxyEnabled ? AnyShapeStyle(Theme.goldGradient) : AnyShapeStyle(.secondary))
+            .labelStyle(.titleAndIcon)
+            .help(model.systemProxyEnabled ? "Перехват трафика Mac включён (⇧⌘P)" : "Перехват трафика Mac выключен (⇧⌘P)")
+            Button { ComposeState.shared.newRequest(); openWindow(id: "compose") } label: {
+                Label("Запрос", systemImage: "paperplane")
+            }
+            .labelStyle(.titleAndIcon)
+            .help("Новый запрос (⌘N). Изменить существующий — двойной клик по нему")
+            Menu {
+                ForEach(RulesTool.allCases) { tool in
+                    Button { open(tool) } label: { Label(tool.title, systemImage: tool.symbol) }
+                }
+            } label: {
                 Label("Правила", systemImage: "slider.horizontal.3")
-            }
-            .help("Map Local, Map Remote, Rewrite, Breakpoints… (⌥⌘L)")
+            } primaryAction: { open(.mapLocal) }
+            .labelStyle(.titleAndIcon)
+            .help("Map Local, Map Remote, Rewrite, точки останова, скрипты…")
+            Button { open(.script) } label: { Label("Скрипты", systemImage: "curlybraces.square") }
+                .labelStyle(.titleAndIcon)
+            .help("JavaScript для запросов и ответов (⌥⌘I)")
             Button { openWindow(id: "breakpoints") } label: {
-                Image(systemName: model.breakpoints.isEmpty ? "pause.circle" : "pause.circle.fill")
-                    .foregroundStyle(model.breakpoints.isEmpty ? AnyShapeStyle(.secondary) : AnyShapeStyle(Theme.goldGradient))
+                Label(model.breakpoints.isEmpty ? "Остановки" : "Остановки \(model.breakpoints.count)",
+                      systemImage: model.breakpoints.isEmpty ? "pause.circle" : "pause.circle.fill")
                     .symbolEffect(.pulse, isActive: !model.breakpoints.isEmpty)
             }
-            .help("Точки останова")
+            .labelStyle(.titleAndIcon)
+            .help("Запросы, остановленные точками останова")
             Button { openWindow(id: "devices") } label: { Label("Устройства", systemImage: "iphone.gen3.radiowaves.left.and.right") }
-                .help("Сертификат и подключение iPhone / Android")
+                .labelStyle(.titleAndIcon)
+            .help("Сертификат и подключение iPhone / Android")
         }
+    }
+
+    private func open(_ tool: RulesTool) {
+        RulesState.shared.tool = tool
+        openWindow(id: "rules")
     }
 }
 
@@ -212,10 +232,65 @@ struct StatusBar: View {
 
 // MARK: - Sidebar
 
+struct DeviceIconView: View {
+    let icon: DeviceIcon
+    let autoSymbol: String
+    var size: CGFloat = 15
+
+    var body: some View {
+        Group {
+            if icon == .android || (icon == .auto && autoSymbol == "candybarphone") {
+                ZStack {
+                    AndroidLogo().fill(Theme.goldGradient, style: FillStyle(eoFill: true))
+                    AndroidAntennas().stroke(Theme.goldGradient, style: StrokeStyle(lineWidth: max(1, size * 0.08), lineCap: .round))
+                }
+                .frame(width: size, height: size * 0.9)
+            } else {
+                Image(systemName: icon.symbol ?? autoSymbol)
+                    .font(.system(size: size))
+                    .foregroundStyle(Theme.goldGradient)
+            }
+        }
+        .contentTransition(.symbolEffect(.replace))
+    }
+}
+
+/// The Android robot head: half-dome with antennas and two eyes cut out.
+struct AndroidLogo: Shape {
+    func path(in r: CGRect) -> Path {
+        var p = Path()
+        let w = r.width, h = r.height
+        let dome = CGRect(x: r.minX, y: r.minY + h * 0.28, width: w, height: h * 1.32)
+        p.move(to: CGPoint(x: dome.minX, y: dome.midY))
+        p.addArc(center: CGPoint(x: dome.midX, y: dome.midY), radius: w / 2,
+                 startAngle: .degrees(180), endAngle: .degrees(0), clockwise: false)
+        p.closeSubpath()
+        // Eyes
+        let eye = w * 0.12
+        for x in [0.32, 0.68] {
+            p.addEllipse(in: CGRect(x: r.minX + w * x - eye / 2, y: r.minY + h * 0.62, width: eye, height: eye))
+        }
+        return p
+    }
+}
+
+struct AndroidAntennas: Shape {
+    func path(in r: CGRect) -> Path {
+        var p = Path()
+        for (x, dx) in [(0.3, -0.1), (0.7, 0.1)] {
+            p.move(to: CGPoint(x: r.minX + r.width * x, y: r.minY + r.height * 0.42))
+            p.addLine(to: CGPoint(x: r.minX + r.width * (x + dx), y: r.minY + r.height * 0.1))
+        }
+        return p
+    }
+}
+
 /// Proxyman-style tree: device → its apps → their domains, plus the device's domains.
 struct SidebarView: View {
     @Environment(AppModel.self) private var model
     @AppStorage("sidebarExpanded") private var expandedRaw = "Mac|Mac/apps"
+    @UIState private var renaming: SidebarDevice?
+    @UIState private var renameText = ""
 
     var body: some View {
         @Bindable var model = model
@@ -229,7 +304,14 @@ struct SidebarView: View {
             if !model.pinnedHosts.isEmpty || !model.pinnedApps.isEmpty {
                 Section("Закреплённые") {
                     ForEach(model.pinnedApps, id: \.self) { a in
-                        row(a, "app.badge", nil).tag(SidebarItem.app(a))
+                        HStack {
+                            Label { Text(a).lineLimit(1) } icon: {
+                                AppIconView(app: a, path: model.rows.last(where: { $0.appName == a })?.appPath,
+                                            remote: model.rows.last(where: { $0.appName == a })?.isRemote ?? false)
+                            }
+                            Spacer()
+                        }
+                        .tag(SidebarItem.app(a))
                             .contextMenu { Button("Открепить") { withAnimation { model.pinnedApps.removeAll { $0 == a } } } }
                     }
                     ForEach(model.pinnedHosts, id: \.self) { h in
@@ -281,6 +363,19 @@ struct SidebarView: View {
             }
         }
         .listStyle(.sidebar)
+        .alert("Название устройства", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
+            TextField("Например, iPhone тестовый", text: $renameText)
+            Button("Сохранить") {
+                if let d = renaming {
+                    let name = renameText.trimmingCharacters(in: .whitespaces)
+                    model.updateDevice(d.key) { $0.name = name.isEmpty ? nil : name }
+                }
+                renaming = nil
+            }
+            Button("Отмена", role: .cancel) { renaming = nil }
+        } message: {
+            if let d = renaming { Text(d.detail.isEmpty ? "Этот Mac" : "Адрес \(d.detail)") }
+        }
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: model.deviceTree.map(\.key))
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: model.sidebarSort)
         .animation(.easeInOut(duration: 0.25), value: expandedRaw)
@@ -288,14 +383,17 @@ struct SidebarView: View {
 
     private func deviceRow(_ d: SidebarDevice) -> some View {
         HStack(spacing: 8) {
-            Image(systemName: d.symbol)
-                .font(.system(size: 14))
-                .foregroundStyle(Theme.goldGradient)
+            DeviceIconView(icon: d.icon, autoSymbol: d.symbol, size: 15)
                 .frame(width: 18)
-            VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 5) {
                 Text(d.name).font(.system(size: 12.5, weight: .semibold)).lineLimit(1)
+                    .onTapGesture(count: 2) { startRename(d) }
+                if d.pinned {
+                    Image(systemName: "pin.fill").font(.system(size: 8)).foregroundStyle(Theme.gold)
+                        .transition(.scale.combined(with: .opacity))
+                }
                 if !d.detail.isEmpty {
-                    Text(d.detail).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
+                    Text(d.detail).font(.system(size: 10.5)).foregroundStyle(.tertiary).lineLimit(1).truncationMode(.middle)
                 }
             }
             Spacer()
@@ -305,9 +403,31 @@ struct SidebarView: View {
             countBadge(d.count)
         }
         .contextMenu {
+            Button("Переименовать…") { startRename(d) }
+            Menu("Иконка") {
+                ForEach(DeviceIcon.allCases) { icon in
+                    Button {
+                        model.updateDevice(d.key) { $0.icon = icon }
+                    } label: {
+                        if let s = icon == .auto ? d.symbol : icon.symbol { Label(icon.title, systemImage: s) }
+                        else { Label(icon.title, systemImage: "a.circle") }
+                    }
+                }
+            }
+            Button(d.pinned ? "Открепить" : "Закрепить наверху") { model.updateDevice(d.key) { $0.pinned.toggle() } }
+            Divider()
             Button("Показать только это устройство") { model.sidebar = .device(d.key) }
             Button("Развернуть") { setExpanded(d.key, true); setExpanded(d.key + "/apps", true) }
+            if model.deviceProfiles[d.key] != nil {
+                Divider()
+                Button("Сбросить название и иконку") { model.updateDevice(d.key) { $0 = DeviceProfile() } }
+            }
         }
+    }
+
+    private func startRename(_ d: SidebarDevice) {
+        renameText = d.name
+        renaming = d
     }
 
     private func appRow(_ d: SidebarDevice, _ app: SidebarApp) -> some View {
@@ -316,7 +436,7 @@ struct SidebarView: View {
         } label: {
             HStack {
                 Label { Text(app.name).lineLimit(1).truncationMode(.middle) } icon: {
-                    Image(systemName: "app.dashed").foregroundStyle(Theme.gold)
+                    AppIconView(app: app.name, path: app.path, remote: app.remote, size: 16)
                 }
                 Spacer()
                 countBadge(app.count)
@@ -439,7 +559,10 @@ struct FlowTable: View {
                     }
                     .width(min: 200, ideal: 520)
                     TableColumn("Клиент", value: \.appName) { r in
-                        Text(r.appName).lineLimit(1).foregroundStyle(.secondary)
+                        HStack(spacing: 5) {
+                            AppIconView(app: r.appName, path: r.appPath, remote: r.isRemote, size: 14)
+                            Text(r.appName).lineLimit(1).foregroundStyle(.secondary)
+                        }
                     }
                     .width(min: 60, ideal: 110)
                     TableColumn("Метод", value: \.method) { r in
@@ -474,7 +597,7 @@ struct FlowTable: View {
                     FlowContextMenu(ids: ids)
                 } primaryAction: { ids in
                     if let id = ids.first, let f = model.flows[id] {
-                        ComposeState.shared.load(f.request)
+                        ComposeState.shared.load(f)
                         openWindow(id: "compose")
                     }
                 }
@@ -521,9 +644,11 @@ struct FlowContextMenu: View {
             Divider()
             Button("Повторить") { for x in flows { model.repeatRequest(x.request) } }
             Button("Изменить и отправить…") {
-                ComposeState.shared.load(f.request)
+                ComposeState.shared.load(f)
                 openWindow(id: "compose")
             }
+            Button("Скрипт для этого запроса…") { create(.script, f) }
+            Button("Подменить ответ (Map Local)…") { create(.mapLocal, f) }
             Divider()
             Menu("Создать правило") {
                 Button("Map Local — подменить ответ") { create(.mapLocal, f) }

@@ -172,73 +172,275 @@ struct BreakpointsView: View {
     }
 }
 
-// MARK: - Compose
+// MARK: - Edit & send
 
 @MainActor
 @Observable
 final class ComposeState {
     static let shared = ComposeState()
-    var message = EditableMessage()
+    var request = EditableMessage()
     var template: RequestData?
+    var response: EditableMessage?
+    var original: ResponseData?
+    var sourceFlowID: Int?
+    var sending = false
+    var lastDuration: TimeInterval?
+    var responseEdited = false
+    /// Map Local rule made from this window, updated on the next "Подменять".
+    var mockRuleID: UUID?
 
     init() {
-        message.url = "https://httpbin.org/get"
-        message.headers = [HTTPHeader("Accept", "application/json")]
+        request.url = "https://httpbin.org/get"
+        request.headers = [HTTPHeader("Accept", "application/json")]
+    }
+
+    func load(_ flow: FlowData) {
+        template = flow.request
+        request = EditableMessage(request: flow.request)
+        request.bodyEdited = false
+        original = flow.response
+        response = flow.response.map { EditableMessage(response: $0) }
+        responseEdited = false
+        sourceFlowID = flow.id
+        lastDuration = flow.duration
+        mockRuleID = nil
     }
 
     func load(_ request: RequestData) {
         template = request
-        message = EditableMessage(request: request)
-        message.bodyEdited = false
+        self.request = EditableMessage(request: request)
+        self.request.bodyEdited = false
+        original = nil
+        response = nil
+        responseEdited = false
+        sourceFlowID = nil
+        mockRuleID = nil
+    }
+
+    func newRequest() {
+        template = nil
+        request = EditableMessage()
+        request.url = "https://"
+        request.headers = [HTTPHeader("Accept", "application/json")]
+        original = nil
+        response = nil
+        sourceFlowID = nil
+        mockRuleID = nil
     }
 }
 
+/// Request on the left (edit and send), the answer on the right (edit and make the app receive it).
 struct ComposeView: View {
     @Environment(AppModel.self) private var model
     @UIState private var state = ComposeState.shared
-    @UIState private var sentPulse = false
+    @UIState private var requestTab = "Тело"
+    @UIState private var responseTab = "Тело"
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Picker("", selection: $state.message.method) {
-                    ForEach(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"], id: \.self) { Text($0).tag($0) }
-                }
-                .labelsHidden().frame(width: 100)
-                TextField("https://", text: $state.message.url).textFieldStyle(.roundedBorder)
-                    .font(.system(size: 12.5, design: .monospaced))
-                Button {
-                    send()
-                } label: {
-                    Label("Отправить", systemImage: "paperplane.fill")
-                        .scaleEffect(sentPulse ? 1.12 : 1)
-                }
-                .buttonStyle(.borderedProminent).tint(Theme.amber)
-                .keyboardShortcut(.return, modifiers: .command)
-            }
-            FieldLabel(text: "Заголовки")
-            ScrollView { HeadersEditor(headers: $state.message.headers) }.frame(maxHeight: 200)
-            FieldLabel(text: "Тело")
-            CodeView(text: state.message.body, editable: true) { state.message.body = $0; state.message.bodyEdited = true }
-                .background(RoundedRectangle(cornerRadius: 8).fill(Theme.surface))
-            Text("Запрос появится в списке как клиент «Snifix» и пройдёт через все правила.")
-                .font(.system(size: 11)).foregroundStyle(.secondary)
+        HSplitView {
+            requestPane.frame(minWidth: 380)
+            responsePane.frame(minWidth: 380)
         }
-        .padding(14)
-        .frame(minWidth: 640, minHeight: 460)
+        .frame(minWidth: 900, minHeight: 560)
         .background(Theme.background)
     }
 
+    // MARK: Request
+
+    private var requestPane: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("ЗАПРОС").font(.system(size: 12, weight: .bold)).foregroundStyle(Theme.goldGradient)
+                Spacer()
+                if state.template != nil {
+                    Button("Сбросить") { if let t = state.template { state.request = EditableMessage(request: t); state.request.bodyEdited = false } }
+                        .buttonStyle(.borderless).font(.system(size: 11))
+                }
+            }
+            HStack {
+                Picker("", selection: $state.request.method) {
+                    ForEach(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"], id: \.self) { Text($0).tag($0) }
+                }
+                .labelsHidden().frame(width: 96)
+                TextField("https://", text: $state.request.url).textFieldStyle(.roundedBorder)
+                    .font(.system(size: 12.5, design: .monospaced))
+            }
+            HStack {
+                GoldSegments(items: ["Заголовки", "Тело"].map(TabName.init), selection: Binding(
+                    get: { TabName(requestTab) }, set: { requestTab = $0.id })) { t in
+                    t.id == "Заголовки" ? "Заголовки \(state.request.headers.count)" : "Тело"
+                }
+                Spacer()
+                if requestTab == "Тело" {
+                    Button("Форматировать JSON") { state.request.body = JSONPretty.format(state.request.body); state.request.bodyEdited = true }
+                        .buttonStyle(.borderless).font(.system(size: 11))
+                }
+            }
+            Group {
+                if requestTab == "Заголовки" {
+                    ScrollView { HeadersEditor(headers: $state.request.headers) }
+                } else {
+                    CodeView(text: state.request.body, editable: true) { state.request.body = $0; state.request.bodyEdited = true }
+                        .background(RoundedRectangle(cornerRadius: 8).fill(Theme.surface))
+                }
+            }
+            .frame(maxHeight: .infinity)
+            HStack {
+                Text("Запрос пройдёт через правила и появится в списке как «Snifix».")
+                    .font(.system(size: 11)).foregroundStyle(.secondary)
+                Spacer()
+                Button {
+                    send()
+                } label: {
+                    HStack(spacing: 6) {
+                        if state.sending { ProgressView().controlSize(.small) }
+                        else { Image(systemName: "paperplane.fill") }
+                        Text("Отправить")
+                    }
+                    .frame(minWidth: 110)
+                }
+                .buttonStyle(.borderedProminent).tint(Theme.amber).controlSize(.large)
+                .keyboardShortcut(.return, modifiers: .command)
+                .disabled(state.sending)
+            }
+        }
+        .padding(14)
+    }
+
+    // MARK: Response
+
+    private var responsePane: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("ОТВЕТ").font(.system(size: 12, weight: .bold)).foregroundStyle(Theme.goldGradient)
+                if let r = state.response {
+                    Text("\(r.statusCode) \(ResponseData.standardReason(r.statusCode))")
+                        .font(.system(size: 11.5, weight: .medium, design: .monospaced))
+                        .foregroundStyle(Theme.statusColor(r.statusCode))
+                        .contentTransition(.numericText())
+                }
+                if state.responseEdited { Badge(text: "изменён") }
+                Spacer()
+                if let d = state.lastDuration { Text(formatDuration(d)).font(.system(size: 11)).foregroundStyle(.secondary) }
+            }
+            if state.response != nil {
+                let response = Binding(get: { state.response ?? EditableMessage() }, set: { state.response = $0; state.responseEdited = true })
+                HStack {
+                    Text("Код").font(.system(size: 12)).foregroundStyle(.secondary)
+                    TextField("", value: response.statusCode, format: .number.grouping(.never))
+                        .textFieldStyle(.roundedBorder).frame(width: 70)
+                    Spacer()
+                    GoldSegments(items: ["Заголовки", "Тело"].map(TabName.init), selection: Binding(
+                        get: { TabName(responseTab) }, set: { responseTab = $0.id })) { t in
+                        t.id == "Заголовки" ? "Заголовки \(state.response?.headers.count ?? 0)" : "Тело"
+                    }
+                }
+                Group {
+                    if responseTab == "Заголовки" {
+                        ScrollView { HeadersEditor(headers: response.headers) }
+                    } else {
+                        CodeView(text: state.response?.body ?? "", json: true, editable: true) { text in
+                            state.response?.body = text
+                            state.response?.bodyEdited = true
+                            state.responseEdited = true
+                        }
+                        .background(RoundedRectangle(cornerRadius: 8).fill(Theme.surface))
+                    }
+                }
+                .frame(maxHeight: .infinity)
+                .transition(.opacity)
+                HStack(spacing: 8) {
+                    Button("Форматировать JSON") {
+                        if let b = state.response?.body { state.response?.body = JSONPretty.format(b) }
+                    }
+                    .buttonStyle(.borderless).font(.system(size: 11))
+                    if state.responseEdited, let o = state.original {
+                        Button("Вернуть ответ сервера") {
+                            state.response = EditableMessage(response: o)
+                            state.responseEdited = false
+                        }
+                        .buttonStyle(.borderless).font(.system(size: 11))
+                    }
+                    Spacer()
+                    if let id = state.mockRuleID, model.rules.rules.contains(where: { $0.id == id && $0.enabled }) {
+                        Button("Выключить подмену") { setMock(enabled: false) }
+                    }
+                    Button {
+                        applyMock()
+                    } label: {
+                        Label(state.mockRuleID == nil ? "Подменять этот ответ" : "Обновить подмену", systemImage: "doc.badge.arrow.up")
+                    }
+                    .buttonStyle(.borderedProminent).tint(Theme.amber).controlSize(.large)
+                    .help("Создаёт правило Map Local: приложение будет получать этот ответ вместо ответа сервера")
+                }
+            } else {
+                EmptyState(symbol: "arrow.left.circle", title: state.sending ? "Отправляем…" : "Ответа пока нет",
+                           subtitle: "Нажмите «Отправить» (⌘↩) — ответ сервера появится здесь, его можно изменить и подменять для приложения.")
+            }
+        }
+        .padding(14)
+        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: state.response == nil)
+    }
+
+    // MARK: Actions
+
     private func send() {
         let base = state.template ?? RequestData(method: "GET", scheme: "https", host: "", port: 443, path: "/", headers: [], body: Data())
-        var request = state.message.apply(to: base)
-        if !state.message.bodyEdited && state.template == nil { request.body = Data(state.message.body.utf8) }
+        var request = state.request.apply(to: base)
+        if state.template == nil { request.body = Data(state.request.body.utf8) }
         guard !request.host.isEmpty else {
             model.showToast("Укажите полный URL", symbol: "exclamationmark.triangle.fill")
             return
         }
-        model.repeatRequest(request)
-        withAnimation(.spring(response: 0.2, dampingFraction: 0.4)) { sentPulse = true }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { withAnimation(.spring()) { sentPulse = false } }
+        state.sending = true
+        let engine = model.engine
+        let started = Date()
+        Task {
+            let (_, response) = await engine.replay(request)
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
+                state.sending = false
+                state.lastDuration = Date().timeIntervalSince(started)
+                state.original = response
+                state.response = response.map { EditableMessage(response: $0) }
+                state.responseEdited = false
+            }
+            if response == nil { model.showToast("Сервер не ответил", symbol: "exclamationmark.triangle.fill") }
+        }
     }
+
+    private func applyMock() {
+        guard let edited = state.response else { return }
+        let base = state.template ?? RequestData(method: "GET", scheme: "https", host: "", port: 443, path: "/", headers: [], body: Data())
+        let request = state.request.apply(to: base)
+        guard !request.host.isEmpty else { return }
+        let pattern = request.scheme + "://" + request.authority + request.pathOnly
+        var rule = state.mockRuleID.flatMap { id in model.rules.rules.first { $0.id == id } }
+            ?? Rule(name: "\(request.method) \(request.host)\(request.pathOnly)", kind: .mapLocal,
+                    matcher: RuleMatcher(pattern: pattern, includeSubpaths: false, methods: [request.method]))
+        rule.enabled = true
+        rule.mapLocal.source = .inline
+        rule.mapLocal.statusCode = edited.statusCode
+        rule.mapLocal.headers = edited.headers.filter {
+            !["content-length", "content-encoding", "transfer-encoding", "connection", "date"].contains($0.name.lowercased())
+        }
+        rule.mapLocal.body = edited.body
+        if let i = model.rules.rules.firstIndex(where: { $0.id == rule.id }) {
+            model.rules.rules[i] = rule
+        } else {
+            model.rules.rules.append(rule)
+        }
+        state.mockRuleID = rule.id
+        model.showToast("Приложение будет получать этот ответ · Map Local «\(rule.name)»", symbol: "doc.badge.arrow.up.fill")
+    }
+
+    private func setMock(enabled: Bool) {
+        guard let id = state.mockRuleID, let i = model.rules.rules.firstIndex(where: { $0.id == id }) else { return }
+        model.rules.rules[i].enabled = enabled
+        model.showToast(enabled ? "Подмена включена" : "Подмена выключена — снова отвечает сервер")
+    }
+}
+
+struct TabName: Identifiable, Hashable {
+    let id: String
+    init(_ id: String) { self.id = id }
 }

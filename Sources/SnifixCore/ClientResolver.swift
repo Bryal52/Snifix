@@ -17,8 +17,9 @@ public enum ClientResolver {
                 info.deviceName = "Android"
                 return info
             }
-            info.bundlePath = path.flatMap(outermostBundle)
-            info.appName = info.bundlePath.map { ($0 as NSString).lastPathComponent.replacingOccurrences(of: ".app", with: "") }
+            // The .app bundle when there is one, else the executable (its icon is still shown)
+            info.bundlePath = path.flatMap(outermostBundle) ?? path
+            info.appName = path.flatMap(outermostBundle).map { ($0 as NSString).lastPathComponent.replacingOccurrences(of: ".app", with: "") }
                 ?? path.map { ($0 as NSString).lastPathComponent }
             info.deviceName = "Mac"
         }

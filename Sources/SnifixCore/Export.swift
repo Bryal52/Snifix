@@ -82,14 +82,19 @@ public enum Export {
 
 extension ProxyEngine {
     /// Sends a request from Snifix itself (Repeat / Compose); it shows up as a new flow and goes through the rules.
-    public func replay(_ request: RequestData) async {
+    /// Returns the finished flow; `response` is set even when recording is paused.
+    @discardableResult
+    public func replay(_ request: RequestData) async -> (flow: FlowData?, response: ResponseData?) {
         let eventLoop = loopGroup.next()
         let client = ClientInfo(address: "127.0.0.1", port: 0, isLocal: true, appName: "Snifix", deviceName: "Mac")
         let recorder = makeRecorder(request: request, client: client, isSSL: request.scheme == "https")
-        guard let pool = try? await eventLoop.submit({ UpstreamPool(eventLoop: eventLoop, engine: self) }).get() else { return }
-        _ = await process(request, recorder: recorder) { req in
+        guard let pool = try? await eventLoop.submit({ UpstreamPool(eventLoop: eventLoop, engine: self) }).get() else { return (nil, nil) }
+        let outcome = await process(request, recorder: recorder) { req in
             try await eventLoop.flatSubmit { pool.send(req) }.get()
         }
         eventLoop.execute { pool.closeAll() }
+        var response: ResponseData?
+        if case .respond(let r, _) = outcome { response = r }
+        return (recorder?.snapshot, response)
     }
 }

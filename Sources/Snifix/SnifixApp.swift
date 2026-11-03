@@ -34,6 +34,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     model.selection = [last.id]
                 }
                 if let rule = model.rules.rules.first { RulesState.shared.tool = RulesTool(kind: rule.kind); RulesState.shared.selectedRule = rule.id }
+                if let f = model.focusedFlow ?? model.selection.first.flatMap({ model.flows[$0] }) { ComposeState.shared.load(f) }
                 for id in (env["SNIFIX_SNAPSHOT_WINDOWS"] ?? "").split(separator: ",") {
                     BreakpointWindowOpener.openWindow?(String(id))
                 }
@@ -83,10 +84,10 @@ struct SnifixApp: App {
         }
         .defaultSize(width: 900, height: 620)
 
-        Window("Новый запрос", id: "compose") {
+        Window("Изменить и отправить", id: "compose") {
             ComposeView().environment(model).tint(Theme.gold)
         }
-        .defaultSize(width: 760, height: 560)
+        .defaultSize(width: 1100, height: 680)
 
         Window("Устройства", id: "devices") {
             DevicesView().environment(model).tint(Theme.gold)
@@ -105,7 +106,7 @@ struct SnifixCommands: Commands {
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
-            Button("Новый запрос") { ComposeState.shared.template = nil; openWindow(id: "compose") }
+            Button("Новый запрос") { ComposeState.shared.newRequest(); openWindow(id: "compose") }
                 .keyboardShortcut("n")
             Divider()
             Button("Открыть сессию…") {

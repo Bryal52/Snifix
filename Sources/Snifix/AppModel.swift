@@ -16,6 +16,8 @@ struct FlowRow: Identifiable, Hashable {
     var deviceName: String
     /// Groups the requests of one device: "Mac", the phone's IP, or "USB" for Android through adb.
     var deviceKey: String
+    var appPath: String?
+    var isRemote: Bool
     var startedAt: Date
     var duration: Double
     var requestSize: Int
@@ -49,6 +51,8 @@ struct FlowRow: Identifiable, Hashable {
         appName = f.client.appName ?? f.client.address
         deviceName = f.client.deviceName ?? (f.client.isLocal ? "Mac" : "Устройство")
         deviceKey = f.client.isLocal ? "Mac" : f.client.address
+        appPath = f.client.bundlePath
+        isRemote = !f.client.isLocal
         isWebSocket = f.isWebSocket
         ruleNames = f.matchedRules.joined(separator: ", ")
         let short = { (v: String) in v.hasPrefix("HTTP/2") ? "h2" : "h1" }
@@ -92,9 +96,59 @@ struct SidebarLeaf: Identifiable, Hashable {
 struct SidebarApp: Identifiable, Hashable {
     var id: String { name }
     var name: String
+    var path: String?
+    var remote: Bool
     var count: Int
     var last: Date
     var hosts: [SidebarLeaf]
+}
+
+/// Icon the user picked for a device.
+enum DeviceIcon: String, Codable, CaseIterable, Identifiable {
+    case auto, apple, android, laptop, server, iphone, ipad, desktop, network
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .auto: return "Автоматически"
+        case .apple: return "Яблоко"
+        case .android: return "Android"
+        case .laptop: return "Ноутбук"
+        case .server: return "Сервер"
+        case .iphone: return "iPhone"
+        case .ipad: return "iPad"
+        case .desktop: return "Компьютер"
+        case .network: return "Сеть"
+        }
+    }
+    /// SF Symbol; Android is drawn separately (there is no system symbol for it).
+    var symbol: String? {
+        switch self {
+        case .auto, .android: return nil
+        case .apple: return "apple.logo"
+        case .laptop: return "laptopcomputer"
+        case .server: return "server.rack"
+        case .iphone: return "iphone"
+        case .ipad: return "ipad"
+        case .desktop: return "desktopcomputer"
+        case .network: return "network"
+        }
+    }
+}
+
+/// Name, icon and pin a device keeps between launches.
+struct DeviceProfile: Codable, Hashable {
+    var name: String?
+    var icon: DeviceIcon = .auto
+    var pinned = false
+
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        name = try c.decodeIfPresent(String.self, forKey: .name)
+        icon = (try? c.decodeIfPresent(DeviceIcon.self, forKey: .icon)) ?? .auto
+        pinned = try c.decodeIfPresent(Bool.self, forKey: .pinned) ?? false
+    }
 }
 
 struct SidebarDevice: Identifiable, Hashable {
@@ -103,6 +157,8 @@ struct SidebarDevice: Identifiable, Hashable {
     var name: String
     var detail: String
     var symbol: String
+    var icon: DeviceIcon
+    var pinned: Bool
     var count: Int
     var last: Date
     var apps: [SidebarApp]
@@ -225,6 +281,9 @@ final class AppModel {
 
     /// Devices that refuse the Snifix certificate everywhere: address → "iPhone" / "Android" / nil.
     var untrustedDevices: [String: String] = [:]
+    var deviceProfiles: [String: DeviceProfile] = [:] {
+        didSet { save(deviceProfiles, "devices.json"); rebuildSummaries() }
+    }
     var breakpoints: [PendingBreakpoint] = []
     var scriptLog: [String] = []
     var toast: Toast?
@@ -251,6 +310,7 @@ final class AppModel {
             pinnedApps = pins["apps"] ?? []
         }
         caTrustedOnMac = CertificateTrust.isTrusted(ca.certificateDER)
+        deviceProfiles = Self.load([String: DeviceProfile].self, "devices.json", in: supportDirectory) ?? [:]
 
         engine.onUntrustedClient = { [weak self] address, hint in
             Task { @MainActor in
@@ -383,13 +443,16 @@ final class AppModel {
 
     private func rebuildSummaries() {
         struct Acc { var count = 0; var last = Date.distantPast; var names: [String: Int] = [:]
-            var apps: [String: (Int, Date, [String: (Int, Date)])] = [:]; var hosts: [String: (Int, Date)] = [:] }
+            var apps: [String: (Int, Date, [String: (Int, Date)])] = [:]; var hosts: [String: (Int, Date)] = [:]
+            var paths: [String: String] = [:]; var remote = false }
         var acc: [String: Acc] = [:]
         for r in rows {
             var d = acc[r.deviceKey] ?? Acc()
             d.count += 1
             d.last = max(d.last, r.startedAt)
             d.names[r.deviceName, default: 0] += 1
+            d.remote = r.isRemote
+            if let p = r.appPath, d.paths[r.appName] == nil { d.paths[r.appName] = p }
             var app = d.apps[r.appName] ?? (0, .distantPast, [:])
             app.0 += 1
             app.1 = max(app.1, r.startedAt)
@@ -410,12 +473,17 @@ final class AppModel {
             if key == "Mac" { label = "Этот Mac"; detail = "" }
             else if key == "USB" { label = android.count == 1 ? android[0].model : "Android"; detail = "USB" }
             else { label = name == "Mac" ? "Mac" : name; detail = key }
-            let apps = d.apps.map { SidebarApp(name: $0.key, count: $0.value.0, last: $0.value.1, hosts: leaves($0.value.2)) }
-            return SidebarDevice(key: key, name: label, detail: detail, symbol: Self.deviceSymbol(key: key, name: name),
+            let profile = deviceProfiles[key] ?? DeviceProfile()
+            let apps = d.apps.map { SidebarApp(name: $0.key, path: d.paths[$0.key], remote: d.remote,
+                                               count: $0.value.0, last: $0.value.1, hosts: leaves($0.value.2)) }
+            return SidebarDevice(key: key, name: profile.name ?? label, detail: detail, symbol: Self.deviceSymbol(key: key, name: name),
+                                 icon: profile.icon, pinned: profile.pinned,
                                  count: d.count, last: d.last, apps: sortedApps(apps), hosts: leaves(d.hosts))
         }
         // The Mac stays on top, like the local machine in Proxyman
+        // Pinned devices first, then the Mac, then the rest
         tree.sort { a, b in
+            if a.pinned != b.pinned { return a.pinned }
             if (a.key == "Mac") != (b.key == "Mac") { return a.key == "Mac" }
             switch sidebarSort {
             case .name: return a.name.localizedStandardCompare(b.name) == .orderedAscending
@@ -641,6 +709,14 @@ final class AppModel {
     /// By Bonjour name: keeps working when the Mac gets another IP address.
     var pacURL: String { "http://\(NetworkInfo.bonjourName()):\(settings.port)/proxy.pac" }
     var pacURLByIP: String { "http://\(localAddress):\(settings.port)/proxy.pac" }
+
+    func updateDevice(_ key: String, _ change: (inout DeviceProfile) -> Void) {
+        var p = deviceProfiles[key] ?? DeviceProfile()
+        change(&p)
+        withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
+            deviceProfiles[key] = p == DeviceProfile() ? nil : p
+        }
+    }
 
     func retryTrust(_ address: String) {
         engine.clearAutoBypass(client: address)

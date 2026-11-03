@@ -340,6 +340,11 @@ final class FlowRecorder: @unchecked Sendable {
     func fail(_ message: String) {
         update { $0.state = .failed(message); $0.completedAt = Date() }
     }
+
+    var snapshot: FlowData {
+        lock.lock(); defer { lock.unlock() }
+        return flow
+    }
 }
 
 enum ProxyErrors {
