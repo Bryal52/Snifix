@@ -5,7 +5,7 @@
 <h1 align="center">Snifix</h1>
 
 <p align="center">
-  <b>Отладочный HTTP/HTTPS‑прокси для macOS</b><br>
+  <b>Отладочный HTTP/HTTPS‑прокси для macOS и Windows</b><br>
   Смотрите запросы Mac, iPhone и Android, подменяйте ответы сервера и меняйте их скриптами
 </p>
 
@@ -39,8 +39,8 @@
 
 ## Требования
 
-- macOS 14 или новее, Mac на Apple Silicon
-- Для Android — adb (пакет android-platform-tools из Homebrew)
+- **macOS:** 14 или новее, Mac на Apple Silicon. Для Android по USB — adb (пакет android-platform-tools из Homebrew)
+- **Windows:** 10 или 11, 64‑битная
 
 ## Установка
 
@@ -54,6 +54,16 @@
 
 Пошаговая инструкция со скриншотами — в файле `docs/Snifix — инструкция.pdf`.
 
+## Windows
+
+1. Скачайте `Snifix-<версия>-Setup.exe` (установщик) или `Snifix-<версия>-windows-x64.zip` (без установки) из раздела Releases.
+2. Windows SmartScreen может предупредить о неизвестном издателе: «Подробнее» → «Выполнить в любом случае».
+3. В Snifix нажмите **Install Certificate…** и подтвердите предупреждение Windows. После этого кнопка **PC: On** включает перехват трафика компьютера.
+4. Когда Windows спросит про брандмауэр, разрешите доступ — иначе телефоны не смогут подключиться.
+5. iPhone и Android подключаются по Wi‑Fi так же, как на Mac: кнопка **Devices**.
+
+В Windows‑версии есть перехват HTTP, HTTPS и HTTP/2, правила Map Local, Map Remote, Rewrite, Block List, Network Conditions, Scripting и SSL Bypass, Edit & Send с подменой ответа, дерево устройств и донат. Формат правил тот же, что на Mac: их можно экспортировать на одном компьютере и импортировать на другом. Пока только на Mac: Breakpoints, DNS, Allow List, просмотр сообщений WebSocket, иконки приложений и подключение Android по USB.
+
 ## Сборка из исходников
 
 Нужны только Command Line Tools (Xcode не обязателен):
@@ -65,9 +75,16 @@ swift run snifix-selftest   # проверка прокси на настоящ�
 
 Swift, SwiftUI, SwiftNIO, swift-nio-ssl, swift-nio-http2 и swift-certificates. Порт по умолчанию — 9090.
 
+Windows‑версия лежит в папке `windows/`: .NET 10, Avalonia, Titanium.Web.Proxy, Jint. Собирается и проверяется на Windows автоматически в GitHub Actions; вручную:
+
+```sh
+dotnet publish windows/Snifix.Windows -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true
+dotnet run --project windows/Snifix.Windows -- --selftest
+```
+
 ## Где хранятся данные
 
-`~/Library/Application Support/Snifix` — правила (`rules.json`), настройки, сертификат и кэш иконок. Ключ сертификата не покидает ваш Mac.
+На Mac — `~/Library/Application Support/Snifix`, на Windows — `%APPDATA%\Snifix`: правила (`rules.json`), настройки, сертификат и кэш иконок. Ключ сертификата не покидает ваш Mac.
 
 ## Поддержать автора
 
@@ -81,4 +98,4 @@ Snifix предназначен для отладки своих приложе�
 
 ## English
 
-Snifix is an HTTP/HTTPS debugging proxy for macOS. It captures traffic from the Mac, iPhone and Android (HTTP/1.1, HTTP/2, WebSocket), decrypts HTTPS with its own root certificate, and lets you change it with Map Local, Map Remote, Rewrite, Breakpoints, JavaScript scripting, Block List, Network Conditions, SSL Bypass, Allow List and DNS rules. Requires macOS 14 or later on Apple Silicon. Download the DMG from Releases, or build with `./build.sh` (Command Line Tools are enough).
+Snifix is an HTTP/HTTPS debugging proxy for macOS and Windows. It captures traffic from the Mac, iPhone and Android (HTTP/1.1, HTTP/2, WebSocket), decrypts HTTPS with its own root certificate, and lets you change it with Map Local, Map Remote, Rewrite, Breakpoints, JavaScript scripting, Block List, Network Conditions, SSL Bypass, Allow List and DNS rules. Requires macOS 14 or later on Apple Silicon, or Windows 10/11 x64. Download the DMG or the Windows installer from Releases, or build with `./build.sh` (Mac) and `dotnet publish` in `windows/` (Windows).

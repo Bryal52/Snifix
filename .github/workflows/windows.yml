@@ -1,0 +1,72 @@
+name: Windows build
+
+# Builds Snifix for Windows, runs the proxy self-test on a real Windows machine,
+# makes the installer and attaches it to a release.
+on:
+  push:
+    branches: [main]
+    paths: ["windows/**", ".github/workflows/windows.yml"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to attach the installer to (empty: just build)"
+        required: false
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Version
+        shell: pwsh
+        run: |
+          [xml]$p = Get-Content windows/Snifix.Windows/Snifix.Windows.csproj
+          $v = @($p.Project.PropertyGroup | ForEach-Object { $_.Version } | Where-Object { $_ })[0]
+          "SNIFIX_VERSION=$v" >> $env:GITHUB_ENV
+
+      - name: Publish
+        run: >
+          dotnet publish windows/Snifix.Windows -c Release -r win-x64 --self-contained true
+          -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true
+          -o dist/win
+
+      - name: Self-test (real requests through the proxy)
+        shell: pwsh
+        run: |
+          $p = Start-Process dist/win/Snifix.exe -ArgumentList "--selftest" -NoNewWindow -Wait -PassThru -RedirectStandardOutput selftest.txt
+          Get-Content selftest.txt
+          if ($p.ExitCode -ne 0) { exit 1 }
+
+      - name: Installer and zip
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "C:\Program Files (x86)\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" windows/installer/snifix.iss
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          Compress-Archive -Path dist/win/Snifix.exe -DestinationPath "dist/Snifix-$env:SNIFIX_VERSION-windows-x64.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Snifix-windows
+          path: |
+            dist/Snifix-*-Setup.exe
+            dist/Snifix-*-windows-x64.zip
+
+      - name: Attach to release
+        if: github.event_name == 'release' || github.event.inputs.tag != ''
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = if ("${{ github.event_name }}" -eq "release") { "${{ github.event.release.tag_name }}" } else { "${{ github.event.inputs.tag }}" }
+          gh release upload $tag (Get-ChildItem dist/Snifix-*-Setup.exe).FullName (Get-ChildItem dist/Snifix-*-windows-x64.zip).FullName --clobber

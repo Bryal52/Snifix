@@ -1,0 +1,229 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:Snifix"
+        x:Class="Snifix.MainWindow"
+        Title="Snifix" Width="1400" Height="860" MinWidth="980" MinHeight="600"
+        Icon="avares://Snifix/Assets/snifix.ico">
+  <Panel>
+    <DockPanel>
+      <!-- Toolbar -->
+      <Border DockPanel.Dock="Top" Background="#121017" BorderBrush="#2A2633" BorderThickness="0,0,0,1" Padding="10,8">
+        <Grid ColumnDefinitions="Auto,Auto,Auto,*,Auto">
+          <ToggleButton x:Name="RecordButton" Classes="chip" Padding="10,5" IsChecked="True" Click="OnRecord" ToolTip.Tip="Start or stop recording (Ctrl+R)">
+            <StackPanel Orientation="Horizontal" Spacing="7">
+              <Ellipse x:Name="RecordDot" Width="9" Height="9" Fill="#FF4D4D"/>
+              <TextBlock x:Name="RecordText" Text="Recording" VerticalAlignment="Center"/>
+            </StackPanel>
+          </ToggleButton>
+          <Button Grid.Column="1" Classes="tool" Margin="6,0,0,0" Click="OnClear" ToolTip.Tip="Clear (Ctrl+K)">
+            <PathIcon Width="13" Height="13" Data="M6 7h12l-1 14H7z M9 3h6l1 2h4v2H4V5h4z"/>
+          </Button>
+          <StackPanel Grid.Column="2" Margin="14,0,0,0" VerticalAlignment="Center">
+            <TextBlock Text="Snifix" FontWeight="Bold" FontSize="14"/>
+            <TextBlock x:Name="SubtitleText" Text="Recording · 0" FontSize="10.5" Foreground="{StaticResource Muted}"/>
+          </StackPanel>
+          <StackPanel Grid.Column="4" Orientation="Horizontal" Spacing="6">
+            <Button x:Name="ProxyButton" Classes="tool" Click="OnSystemProxy" ToolTip.Tip="Capture this PC's traffic (Ctrl+Shift+P)">
+              <StackPanel Orientation="Horizontal" Spacing="6">
+                <PathIcon Width="14" Height="14" Data="M3 4h18v12H3z M5 6v8h14V6z M1 18h22v2H1z"/>
+                <TextBlock x:Name="ProxyText" Text="PC: Off" VerticalAlignment="Center"/>
+              </StackPanel>
+            </Button>
+            <Button Classes="tool" Click="OnCompose" ToolTip.Tip="New request (Ctrl+N). To edit an existing one, double-click it">
+              <StackPanel Orientation="Horizontal" Spacing="6">
+                <PathIcon Width="13" Height="13" Data="M2 21L23 12 2 3v7l15 2-15 2z"/>
+                <TextBlock Text="Compose"/>
+              </StackPanel>
+            </Button>
+            <Button Classes="tool" Click="OnRules" ToolTip.Tip="Map Local, Map Remote, Rewrite, Block List, Network Conditions, Scripting…">
+              <StackPanel Orientation="Horizontal" Spacing="6">
+                <PathIcon Width="13" Height="13" Data="M3 5h11v2H3z M17 3h2v6h-2z M20 5h1v2h-1z M3 17h5v2H3z M10 15h2v6h-2z M14 17h7v2h-7z M3 11h3v2H3z M8 9h2v6H8z M12 11h9v2h-9z"/>
+                <TextBlock Text="Rules"/>
+              </StackPanel>
+            </Button>
+            <Button Classes="tool" Click="OnScripting" ToolTip.Tip="JavaScript for requests and responses">
+              <StackPanel Orientation="Horizontal" Spacing="6">
+                <TextBlock Text="{}{ }" FontWeight="Bold" FontFamily="{StaticResource Mono}"/>
+                <TextBlock Text="Scripting"/>
+              </StackPanel>
+            </Button>
+            <Button Classes="tool" Click="OnDevices" ToolTip.Tip="Certificate and iPhone / Android setup">
+              <StackPanel Orientation="Horizontal" Spacing="6">
+                <PathIcon Width="12" Height="14" Data="M7 1h10a2 2 0 0 1 2 2v18a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V3a2 2 0 0 1 2-2z M7 4v15h10V4z"/>
+                <TextBlock Text="Devices"/>
+              </StackPanel>
+            </Button>
+            <TextBox x:Name="SearchBox" Width="220" Watermark="Filter: URL, method, status" Margin="6,0,0,0"/>
+          </StackPanel>
+        </Grid>
+      </Border>
+
+      <!-- Problems -->
+      <Border x:Name="ErrorBanner" DockPanel.Dock="Top" Background="#2A1416" Padding="12,8" IsVisible="False">
+        <TextBlock x:Name="ErrorText" Foreground="#FF8A80" TextWrapping="Wrap"/>
+      </Border>
+      <Border x:Name="CertBanner" DockPanel.Dock="Top" Background="#2A2210" Padding="12,8" IsVisible="False">
+        <Grid ColumnDefinitions="*,Auto">
+          <TextBlock VerticalAlignment="Center" TextWrapping="Wrap" Foreground="#FFD27A"
+                     Text="Install the Snifix certificate so that browsers and apps on this PC accept decrypted HTTPS. Capturing this PC's traffic turns on after that."/>
+          <Button Grid.Column="1" Classes="tool gold" Margin="12,0,0,0" Click="OnTrust" Content="Install Certificate…"/>
+        </Grid>
+      </Border>
+
+      <!-- Status bar -->
+      <Border DockPanel.Dock="Bottom" Background="#121017" BorderBrush="#2A2633" BorderThickness="0,1,0,0" Padding="12,4">
+        <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto">
+          <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+            <Ellipse x:Name="StatusDot" Width="7" Height="7" Fill="#4ADE80"/>
+            <SelectableTextBlock x:Name="AddressText" FontSize="11" Foreground="{StaticResource Muted}"/>
+          </StackPanel>
+          <TextBlock x:Name="ProxyStatusText" Grid.Column="1" Margin="16,0,0,0" FontSize="11" VerticalAlignment="Center" Foreground="{StaticResource Muted}"/>
+          <TextBlock x:Name="CountText" Grid.Column="3" FontSize="11" VerticalAlignment="Center" Foreground="{StaticResource Muted}" Margin="0,0,12,0"/>
+          <Button x:Name="DonateButton" Grid.Column="4" Classes="tool" Padding="9,2" Click="OnDonate" ToolTip.Tip="Buy the author a coffee">
+            <StackPanel Orientation="Horizontal" Spacing="5">
+              <PathIcon Width="13" Height="13" Foreground="{StaticResource Gold}"
+                        Data="M3 8h13v5a5 5 0 0 1-5 5H8a5 5 0 0 1-5-5z M16 9h2a3 3 0 0 1 0 6h-2v-2h2a1 1 0 0 0 0-2h-2z M2 20h15v2H2z M7 2h2v4H7z M11 3h2v3h-2z"/>
+              <TextBlock Text="Donate" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource Gold}"/>
+            </StackPanel>
+          </Button>
+        </Grid>
+      </Border>
+
+      <!-- Category filter -->
+      <Border DockPanel.Dock="Top" Padding="10,6" BorderBrush="#2A2633" BorderThickness="0,0,0,1">
+        <Grid ColumnDefinitions="*,Auto">
+          <ItemsControl x:Name="Chips">
+            <ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal" Spacing="2"/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+          </ItemsControl>
+          <ComboBox x:Name="StatusBox" Grid.Column="1" Width="130" SelectedIndex="0">
+            <ComboBoxItem Content="Any Status"/><ComboBoxItem Content="2xx"/><ComboBoxItem Content="3xx"/>
+            <ComboBoxItem Content="4xx"/><ComboBoxItem Content="5xx"/>
+          </ComboBox>
+        </Grid>
+      </Border>
+
+      <Grid ColumnDefinitions="240,4,*">
+        <!-- Sidebar -->
+        <Border Background="#121017">
+          <TreeView x:Name="SidebarTree" Padding="4,6">
+            <TreeView.ItemTemplate>
+              <TreeDataTemplate DataType="local:SidebarNode" ItemsSource="{Binding Children}">
+                <Grid ColumnDefinitions="Auto,*,Auto" Background="Transparent">
+                  <TextBlock Text="{Binding Glyph}" Width="20" FontSize="12" VerticalAlignment="Center" Foreground="{StaticResource Gold}"/>
+                  <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                    <TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis" MaxWidth="150"/>
+                    <TextBlock Text="{Binding Detail}" FontSize="10.5" Foreground="{StaticResource Muted}" VerticalAlignment="Center"/>
+                  </StackPanel>
+                  <TextBlock Grid.Column="2" Text="{Binding Count}" FontSize="10.5" Foreground="{StaticResource Muted}" Margin="8,0,4,0" VerticalAlignment="Center"/>
+                </Grid>
+              </TreeDataTemplate>
+            </TreeView.ItemTemplate>
+            <TreeView.Styles>
+              <Style Selector="TreeViewItem">
+                <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}"/>
+                <Setter Property="MinHeight" Value="26"/>
+              </Style>
+            </TreeView.Styles>
+          </TreeView>
+        </Border>
+        <GridSplitter Grid.Column="1" Background="#1E1B26" ResizeDirection="Columns"/>
+
+        <Grid Grid.Column="2" RowDefinitions="*,4,*">
+          <Panel>
+            <DataGrid x:Name="Grid" IsReadOnly="True" SelectionMode="Extended" CanUserResizeColumns="True" CanUserSortColumns="True"
+                      HeadersVisibility="Column" RowHeight="24">
+              <DataGrid.Columns>
+                <DataGridTextColumn Header="#" Binding="{Binding Id}" Width="54" Foreground="#8D879C"/>
+                <DataGridTemplateColumn Width="22">
+                  <DataGridTemplateColumn.CellTemplate>
+                    <DataTemplate>
+                      <Ellipse Width="7" Height="7" Fill="{Binding StatusColor}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </DataTemplate>
+                  </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+                <DataGridTemplateColumn Header="URL" Width="*" SortMemberPath="Url">
+                  <DataGridTemplateColumn.CellTemplate>
+                    <DataTemplate>
+                      <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center" Margin="4,0">
+                        <TextBlock Text="🔒" FontSize="9" IsVisible="{Binding IsHttps}" Foreground="{StaticResource Gold}" VerticalAlignment="Center"/>
+                        <TextBlock Text="{Binding DisplayUrl}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+                        <Border IsVisible="{Binding HasRules}" Background="#33FFCC33" CornerRadius="8" Padding="6,0">
+                          <TextBlock Text="{Binding RuleNames}" FontSize="10" FontWeight="SemiBold" Foreground="{StaticResource Gold}"/>
+                        </Border>
+                      </StackPanel>
+                    </DataTemplate>
+                  </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+                <DataGridTextColumn Header="Client" Binding="{Binding AppName}" Width="120" Foreground="#B9B5C6"/>
+                <DataGridTemplateColumn Header="Method" Width="78" SortMemberPath="Method">
+                  <DataGridTemplateColumn.CellTemplate>
+                    <DataTemplate>
+                      <TextBlock Text="{Binding Method}" Foreground="{Binding MethodColor}" FontWeight="SemiBold" FontSize="11" VerticalAlignment="Center" Margin="6,0"/>
+                    </DataTemplate>
+                  </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+                <DataGridTextColumn Header="Protocol" Binding="{Binding Protocol}" Width="80" Foreground="{StaticResource Gold}"/>
+                <DataGridTemplateColumn Header="Status" Width="72" SortMemberPath="StatusCode">
+                  <DataGridTemplateColumn.CellTemplate>
+                    <DataTemplate>
+                      <TextBlock Text="{Binding StatusText}" Foreground="{Binding StatusColor}" VerticalAlignment="Center" Margin="6,0"/>
+                    </DataTemplate>
+                  </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+                <DataGridTextColumn Header="Time" Binding="{Binding TimeText}" Width="112" Foreground="#8D879C"/>
+                <DataGridTextColumn Header="Duration" Binding="{Binding DurationText}" Width="90" Foreground="#8D879C"/>
+                <DataGridTextColumn Header="Size" Binding="{Binding SizeText}" Width="76" Foreground="#8D879C"/>
+              </DataGrid.Columns>
+            </DataGrid>
+            <StackPanel x:Name="EmptyState" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="8">
+              <TextBlock Text="((·))" FontSize="34" HorizontalAlignment="Center" Foreground="{StaticResource GoldGradient}"/>
+              <TextBlock Text="Waiting for requests…" FontSize="15" FontWeight="SemiBold" HorizontalAlignment="Center"/>
+              <TextBlock Text="This PC's traffic goes through Snifix while capturing is on. To connect an iPhone or Android, open Devices."
+                         Foreground="{StaticResource Muted}" TextWrapping="Wrap" MaxWidth="380" TextAlignment="Center"/>
+            </StackPanel>
+          </Panel>
+          <GridSplitter Grid.Row="1" Background="#1E1B26" ResizeDirection="Rows"/>
+
+          <Grid Grid.Row="2" ColumnDefinitions="*,4,*">
+            <DockPanel Margin="10,8,6,6">
+              <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8" Margin="2,0,0,6">
+                <TextBlock Classes="title" Text="REQUEST"/>
+                <TextBlock x:Name="RequestTitle" FontFamily="{StaticResource Mono}" FontSize="11.5" Foreground="#FFCC33"/>
+              </StackPanel>
+              <TabControl x:Name="RequestTabs" Padding="0">
+                <TabItem Header="Headers"><TextBox x:Name="RequestHeaders" Classes="code" IsReadOnly="True"/></TabItem>
+                <TabItem Header="Query"><TextBox x:Name="RequestQuery" Classes="code" IsReadOnly="True"/></TabItem>
+                <TabItem Header="Body"><TextBox x:Name="RequestBody" Classes="code" IsReadOnly="True"/></TabItem>
+                <TabItem Header="Raw"><TextBox x:Name="RequestRaw" Classes="code" IsReadOnly="True"/></TabItem>
+                <TabItem Header="Summary"><TextBox x:Name="Summary" Classes="code" IsReadOnly="True"/></TabItem>
+              </TabControl>
+            </DockPanel>
+            <GridSplitter Grid.Column="1" Background="#1E1B26" ResizeDirection="Columns"/>
+            <DockPanel Grid.Column="2" Margin="6,8,10,6">
+              <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8" Margin="2,0,0,6">
+                <TextBlock Classes="title" Text="RESPONSE"/>
+                <TextBlock x:Name="ResponseTitle" FontFamily="{StaticResource Mono}" FontSize="11.5"/>
+              </StackPanel>
+              <TabControl x:Name="ResponseTabs" Padding="0" SelectedIndex="1">
+                <TabItem Header="Headers"><TextBox x:Name="ResponseHeaders" Classes="code" IsReadOnly="True"/></TabItem>
+                <TabItem Header="Body"><TextBox x:Name="ResponseBody" Classes="code" IsReadOnly="True"/></TabItem>
+                <TabItem Header="Raw"><TextBox x:Name="ResponseRaw" Classes="code" IsReadOnly="True"/></TabItem>
+              </TabControl>
+            </DockPanel>
+          </Grid>
+        </Grid>
+      </Grid>
+    </DockPanel>
+
+    <!-- Toast -->
+    <Border x:Name="ToastBorder" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,44"
+            Background="#2A2633" BorderBrush="#66FFCC33" BorderThickness="1" CornerRadius="16" Padding="14,8" Opacity="0" IsHitTestVisible="False">
+      <Border.Transitions>
+        <Transitions>
+          <DoubleTransition Property="Opacity" Duration="0:0:0.25"/>
+        </Transitions>
+      </Border.Transitions>
+      <TextBlock x:Name="ToastText" FontSize="12.5" FontWeight="Medium"/>
+    </Border>
+  </Panel>
+</Window>

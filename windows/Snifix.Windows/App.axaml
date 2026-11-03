@@ -1,0 +1,118 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="Snifix.App"
+             RequestedThemeVariant="Dark">
+  <Application.Resources>
+    <SolidColorBrush x:Key="Bg" Color="#0E0D12"/>
+    <SolidColorBrush x:Key="Surface" Color="#16141D"/>
+    <SolidColorBrush x:Key="Surface2" Color="#1E1B26"/>
+    <SolidColorBrush x:Key="Stroke" Color="#2A2633"/>
+    <SolidColorBrush x:Key="Gold" Color="#FFCC33"/>
+    <SolidColorBrush x:Key="Muted" Color="#8D879C"/>
+    <LinearGradientBrush x:Key="GoldGradient" StartPoint="0%,0%" EndPoint="100%,100%">
+      <GradientStop Color="#FFDB52" Offset="0"/>
+      <GradientStop Color="#FF9A1F" Offset="1"/>
+    </LinearGradientBrush>
+    <FontFamily x:Key="Mono">Cascadia Mono, Consolas, Menlo, monospace</FontFamily>
+  </Application.Resources>
+  <Application.Styles>
+    <FluentTheme>
+      <FluentTheme.Palettes>
+        <ColorPaletteResources x:Key="Dark" Accent="#FFFFB52E" AltHigh="#FF0E0D12" RegionColor="#FF0E0D12"
+                               ChromeMediumLow="#FF16141D" ChromeMedium="#FF1E1B26" ChromeLow="#FF16141D"
+                               BaseHigh="#FFF2F0F7" BaseMediumHigh="#FFD9D5E4" ListLow="#FF1E1B26" ListMedium="#FF2A2633"/>
+      </FluentTheme.Palettes>
+    </FluentTheme>
+    <StyleInclude Source="avares://Avalonia.Controls.DataGrid/Themes/Fluent.xaml"/>
+
+    <Style Selector="Window">
+      <Setter Property="Background" Value="{StaticResource Bg}"/>
+      <Setter Property="FontSize" Value="13"/>
+    </Style>
+
+    <!-- Toolbar buttons: dark capsule, lighter on hover -->
+    <Style Selector="Button.tool">
+      <Setter Property="Background" Value="#1E1B26"/>
+      <Setter Property="Foreground" Value="#D9D5E4"/>
+      <Setter Property="CornerRadius" Value="8"/>
+      <Setter Property="Padding" Value="10,5"/>
+      <Setter Property="BorderThickness" Value="0"/>
+      <Setter Property="Transitions">
+        <Transitions><BrushTransition Property="Background" Duration="0:0:0.15"/></Transitions>
+      </Setter>
+    </Style>
+    <Style Selector="Button.tool:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="#2A2633"/>
+    </Style>
+    <Style Selector="Button.gold, ToggleButton.gold:checked">
+      <Setter Property="Background" Value="{StaticResource GoldGradient}"/>
+      <Setter Property="Foreground" Value="#1A1204"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+    </Style>
+    <Style Selector="Button.gold /template/ ContentPresenter, ToggleButton.gold:checked /template/ ContentPresenter">
+      <Setter Property="Background" Value="{StaticResource GoldGradient}"/>
+      <Setter Property="Foreground" Value="#1A1204"/>
+    </Style>
+    <Style Selector="Button.gold:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="#FFD84A"/>
+    </Style>
+
+    <!-- Category chips -->
+    <Style Selector="ToggleButton.chip">
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="Foreground" Value="#8D879C"/>
+      <Setter Property="CornerRadius" Value="12"/>
+      <Setter Property="Padding" Value="10,3"/>
+      <Setter Property="FontSize" Value="12"/>
+      <Setter Property="BorderThickness" Value="0"/>
+    </Style>
+    <Style Selector="ToggleButton.chip:checked /template/ ContentPresenter">
+      <Setter Property="Background" Value="{StaticResource GoldGradient}"/>
+      <Setter Property="Foreground" Value="#1A1204"/>
+    </Style>
+    <Style Selector="ToggleButton.chip:checked">
+      <Setter Property="FontWeight" Value="SemiBold"/>
+    </Style>
+
+    <Style Selector="TextBox.code">
+      <Setter Property="FontFamily" Value="{StaticResource Mono}"/>
+      <Setter Property="FontSize" Value="12"/>
+      <Setter Property="Background" Value="#16141D"/>
+      <Setter Property="BorderThickness" Value="0"/>
+      <Setter Property="AcceptsReturn" Value="True"/>
+      <Setter Property="TextWrapping" Value="Wrap"/>
+    </Style>
+    <Style Selector="TextBlock.label">
+      <Setter Property="FontSize" Value="10.5"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="Foreground" Value="#8D879C"/>
+      <Setter Property="LetterSpacing" Value="0.6"/>
+    </Style>
+    <Style Selector="TextBlock.title">
+      <Setter Property="FontSize" Value="12"/>
+      <Setter Property="FontWeight" Value="Bold"/>
+      <Setter Property="Foreground" Value="{StaticResource GoldGradient}"/>
+    </Style>
+    <Style Selector="Border.card">
+      <Setter Property="Background" Value="#16141D"/>
+      <Setter Property="BorderBrush" Value="#2A2633"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="CornerRadius" Value="14"/>
+      <Setter Property="Padding" Value="16"/>
+    </Style>
+    <Style Selector="DataGrid">
+      <Setter Property="Background" Value="#0E0D12"/>
+      <Setter Property="RowBackground" Value="#0E0D12"/>
+      <Setter Property="GridLinesVisibility" Value="None"/>
+      <Setter Property="FontSize" Value="12"/>
+    </Style>
+    <Style Selector="DataGridRow:nth-child(2n)">
+      <Setter Property="Background" Value="#131118"/>
+    </Style>
+    <Style Selector="TabItem">
+      <Setter Property="FontSize" Value="13"/>
+      <Setter Property="MinHeight" Value="34"/>
+      <Setter Property="Padding" Value="10,4"/>
+    </Style>
+  </Application.Styles>
+</Application>

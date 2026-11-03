@@ -2,3 +2,5 @@
 .swiftpm/
 dist/
 Resources/AppIcon.iconset/
+windows/**/bin/
+windows/**/obj/
