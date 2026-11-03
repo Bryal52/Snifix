@@ -10,6 +10,27 @@
 </p>
 
 <p align="center">
+  <img src="https://img.shields.io/badge/macOS-14%2B-black?logo=apple" alt="macOS 14+">
+  <img src="https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?logo=windows" alt="Windows 10 / 11">
+  <img src="https://img.shields.io/badge/Swift-6-F05138?logo=swift&logoColor=white" alt="Swift 6">
+  <img src="https://img.shields.io/badge/SwiftUI-macOS-1575F9?logo=swift&logoColor=white" alt="SwiftUI">
+  <img src="https://img.shields.io/badge/.NET-10-512BD4?logo=dotnet&logoColor=white" alt=".NET 10">
+  <img src="https://img.shields.io/badge/Avalonia-11-8B44AC" alt="Avalonia 11">
+  <a href="https://github.com/Bryal52/Snifix/releases/latest"><img src="https://img.shields.io/badge/%D0%B2%D0%B5%D1%80%D1%81%D0%B8%D1%8F-1.1.0-FFB52E" alt="Версия 1.1.0"></a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/Bryal52/Snifix/releases/latest/download/Snifix-1.1.0.dmg"><img src="https://img.shields.io/badge/%D0%A1%D0%BA%D0%B0%D1%87%D0%B0%D1%82%D1%8C_%D0%B4%D0%BB%D1%8F_macOS-1.1.0-000000?style=for-the-badge&logo=apple&logoColor=white" alt="Скачать для macOS" height="36"></a>
+  &nbsp;
+  <a href="https://github.com/Bryal52/Snifix/releases/latest/download/Snifix-1.1.0-Setup.exe"><img src="https://img.shields.io/badge/%D0%A1%D0%BA%D0%B0%D1%87%D0%B0%D1%82%D1%8C_%D0%B4%D0%BB%D1%8F_Windows-1.1.0-0078D4?style=for-the-badge&logo=windows&logoColor=white" alt="Скачать для Windows" height="36"></a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/Bryal52/Snifix/releases/latest/download/Snifix-1.1.0-windows-x64.zip">Windows без установки (zip)</a> ·
+  <a href="https://github.com/Bryal52/Snifix/releases/latest/download/Snifix-Guide-RU.pdf">Инструкция со скриншотами (PDF)</a>
+</p>
+
+<p align="center">
   <img src="docs/guide/img/main.png" width="900" alt="Главное окно Snifix">
 </p>
 
