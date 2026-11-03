@@ -6,10 +6,12 @@ struct RuleEditor: View {
     let ruleID: UUID
     @Environment(AppModel.self) private var model
 
+    /// Looks the rule up by id on every access: SwiftUI may read the binding once more after the rule was deleted.
     private var binding: Binding<Rule>? {
-        guard let i = model.rules.rules.firstIndex(where: { $0.id == ruleID }) else { return nil }
-        return Binding(get: { model.rules.rules[min(i, model.rules.rules.count - 1)] },
-                       set: { v in if let j = model.rules.rules.firstIndex(where: { $0.id == ruleID }) { model.rules.rules[j] = v } })
+        guard let current = model.rules.rules.first(where: { $0.id == ruleID }) else { return nil }
+        let id = ruleID
+        return Binding(get: { model.rules.rules.first { $0.id == id } ?? current },
+                       set: { v in if let j = model.rules.rules.firstIndex(where: { $0.id == id }) { model.rules.rules[j] = v } })
     }
 
     var body: some View {
@@ -293,34 +295,36 @@ struct RewriteFields: View {
                 Button { withAnimation { steps.append(RewriteStep()) } } label: { Label("Добавить", systemImage: "plus.circle") }
                     .buttonStyle(.borderless).font(.system(size: 12))
             }
-            ForEach($steps) { $step in
+            ForEach(steps) { item in
+                let step = Binding(get: { steps.first { $0.id == item.id } ?? item },
+                                   set: { v in if let i = steps.firstIndex(where: { $0.id == item.id }) { steps[i] = v } })
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
-                        Picker("", selection: $step.target) {
+                        Picker("", selection: step.target) {
                             Text("Запрос").tag(RewriteTarget.request)
                             Text("Ответ").tag(RewriteTarget.response)
                         }
                         .pickerStyle(.segmented).labelsHidden().fixedSize()
-                        Picker("", selection: $step.operation) {
-                            ForEach(operations(for: step.target), id: \.self) { Text(title($0)).tag($0) }
+                        Picker("", selection: step.operation) {
+                            ForEach(operations(for: step.wrappedValue.target), id: \.self) { Text(title($0)).tag($0) }
                         }
                         .labelsHidden().fixedSize()
                         Spacer()
-                        Button { withAnimation { steps.removeAll { $0.id == step.id } } } label: { Image(systemName: "trash") }
+                        Button { withAnimation { steps.removeAll { $0.id == item.id } } } label: { Image(systemName: "trash") }
                             .buttonStyle(.borderless)
                     }
                     HStack {
-                        if needsKey(step.operation) {
-                            TextField(keyPlaceholder(step.operation), text: $step.key).textFieldStyle(.roundedBorder)
+                        if needsKey(step.wrappedValue.operation) {
+                            TextField(keyPlaceholder(step.wrappedValue.operation), text: step.key).textFieldStyle(.roundedBorder)
                         }
-                        if needsValue(step.operation) {
-                            TextField(step.operation == .setStatus ? "Код, например 500" : "Значение", text: $step.value)
+                        if needsValue(step.wrappedValue.operation) {
+                            TextField(step.wrappedValue.operation == .setStatus ? "Код, например 500" : "Значение", text: step.value)
                                 .textFieldStyle(.roundedBorder)
                         }
                     }
                     .font(.system(size: 12, design: .monospaced))
-                    if step.operation == .replaceBody || step.operation == .replaceURL {
-                        Toggle("Регулярное выражение", isOn: $step.useRegex).font(.system(size: 11))
+                    if step.wrappedValue.operation == .replaceBody || step.wrappedValue.operation == .replaceURL {
+                        Toggle("Регулярное выражение", isOn: step.useRegex).font(.system(size: 11))
                     }
                 }
                 .padding(10)

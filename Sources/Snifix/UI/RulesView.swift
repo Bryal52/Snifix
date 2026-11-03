@@ -474,13 +474,15 @@ struct DNSEditor: View {
             }
             Text(RulesTool.dns.help).font(.system(size: 12)).foregroundStyle(.secondary)
             List {
-                ForEach($model.rules.dnsOverrides) { $o in
+                ForEach(model.rules.dnsOverrides) { item in
+                    let o = Binding(get: { model.rules.dnsOverrides.first { $0.id == item.id } ?? item },
+                                    set: { v in if let i = model.rules.dnsOverrides.firstIndex(where: { $0.id == item.id }) { model.rules.dnsOverrides[i] = v } })
                     HStack {
-                        Toggle("", isOn: $o.enabled).toggleStyle(.switch).controlSize(.mini).labelsHidden()
-                        TextField("Хост", text: $o.host).textFieldStyle(.roundedBorder)
+                        Toggle("", isOn: o.enabled).toggleStyle(.switch).controlSize(.mini).labelsHidden()
+                        TextField("Хост", text: o.host).textFieldStyle(.roundedBorder)
                         Image(systemName: "arrow.right").foregroundStyle(Theme.gold)
-                        TextField("IP", text: $o.address).textFieldStyle(.roundedBorder).frame(width: 150)
-                        Button { withAnimation { model.rules.dnsOverrides.removeAll { $0.id == o.id } } } label: {
+                        TextField("IP", text: o.address).textFieldStyle(.roundedBorder).frame(width: 150)
+                        Button { withAnimation { model.rules.dnsOverrides.removeAll { $0.id == item.id } } } label: {
                             Image(systemName: "minus.circle")
                         }
                         .buttonStyle(.borderless)

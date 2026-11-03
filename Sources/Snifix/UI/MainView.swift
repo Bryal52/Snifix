@@ -126,13 +126,7 @@ struct MainToolbar: ToolbarContent {
                 .help("Очистить (⌘K)")
         }
         ToolbarItemGroup(placement: .primaryAction) {
-            Button { model.setSystemProxy(!model.systemProxyEnabled) } label: {
-                Label(model.systemProxyEnabled ? "Mac: вкл" : "Mac: выкл",
-                      systemImage: model.systemProxyEnabled ? "macbook.and.iphone" : "macbook")
-            }
-            .foregroundStyle(model.systemProxyEnabled ? AnyShapeStyle(Theme.goldGradient) : AnyShapeStyle(.secondary))
-            .labelStyle(.titleAndIcon)
-            .help(model.systemProxyEnabled ? "Перехват трафика Mac включён (⇧⌘P)" : "Перехват трафика Mac выключен (⇧⌘P)")
+            MacProxyButton()
             Button { ComposeState.shared.newRequest(); openWindow(id: "compose") } label: {
                 Label("Запрос", systemImage: "paperplane")
             }
@@ -166,6 +160,45 @@ struct MainToolbar: ToolbarContent {
     private func open(_ tool: RulesTool) {
         RulesState.shared.tool = tool
         openWindow(id: "rules")
+    }
+}
+
+/// Gold glowing capsule while the Mac's traffic goes through Snifix; switching runs in the background.
+struct MacProxyButton: View {
+    @Environment(AppModel.self) private var model
+    @UIState private var hover = false
+
+    var body: some View {
+        let on = model.systemProxyEnabled
+        Button { model.setSystemProxy(!on) } label: {
+            HStack(spacing: 5) {
+                ZStack {
+                    if model.systemProxySwitching {
+                        ProgressView().controlSize(.small).scaleEffect(0.6)
+                    } else {
+                        Image(systemName: on ? "macbook.and.iphone" : "macbook")
+                            .font(.system(size: 12, weight: .medium))
+                            .contentTransition(.symbolEffect(.replace))
+                    }
+                }
+                .frame(width: 18, height: 16)
+                Text(on ? "Mac: вкл" : "Mac: выкл").font(.system(size: 12, weight: on ? .semibold : .regular))
+            }
+            .foregroundStyle(on ? Color.black.opacity(0.85) : Color.secondary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+            .background {
+                Capsule().fill(on ? AnyShapeStyle(Theme.goldGradient) : AnyShapeStyle(Color.primary.opacity(hover ? 0.1 : 0.05)))
+            }
+            .shadow(color: on ? Theme.amber.opacity(0.55) : .clear, radius: 7)
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .disabled(model.systemProxySwitching)
+        .onHover { hover = $0 }
+        .animation(.spring(response: 0.35, dampingFraction: 0.75), value: on)
+        .animation(.easeOut(duration: 0.15), value: hover)
+        .help(on ? "Трафик Mac идёт через Snifix — нажмите, чтобы выключить (⇧⌘P)" : "Трафик Mac идёт напрямую — нажмите, чтобы включить (⇧⌘P)")
     }
 }
 

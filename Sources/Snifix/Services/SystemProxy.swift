@@ -2,7 +2,9 @@ import Foundation
 
 /// Points the Mac's network services at Snifix and puts the previous settings back afterwards.
 /// The previous settings are kept on disk, so a crash is repaired on the next launch.
-final class SystemProxy {
+final class SystemProxy: @unchecked Sendable {
+    /// networksetup calls take seconds in total; they run off the main thread, one change at a time.
+    private let lock = NSLock()
     private struct Saved: Codable {
         var service: String
         var web: Entry
@@ -27,6 +29,7 @@ final class SystemProxy {
     }
 
     func enable(port: Int) {
+        lock.lock(); defer { lock.unlock() }
         var saved: [Saved] = []
         if let data = try? Data(contentsOf: stateURL), let old = try? JSONDecoder().decode([Saved].self, from: data) {
             saved = old
@@ -51,6 +54,7 @@ final class SystemProxy {
     }
 
     func disable() {
+        lock.lock(); defer { lock.unlock() }
         let saved = (try? Data(contentsOf: stateURL)).flatMap { try? JSONDecoder().decode([Saved].self, from: $0) } ?? []
         for service in Self.services() {
             if let s = saved.first(where: { $0.service == service }) {

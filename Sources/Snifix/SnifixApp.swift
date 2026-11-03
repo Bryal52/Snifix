@@ -35,8 +35,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
                 if let rule = model.rules.rules.first { RulesState.shared.tool = RulesTool(kind: rule.kind); RulesState.shared.selectedRule = rule.id }
                 if let f = model.focusedFlow ?? model.selection.first.flatMap({ model.flows[$0] }) { ComposeState.shared.load(f) }
+                // Only the look of the button: the Mac's network settings stay untouched
+                if env["SNIFIX_SNAPSHOT_PROXY_ON"] != nil { model.systemProxyEnabled = true }
                 for id in (env["SNIFIX_SNAPSHOT_WINDOWS"] ?? "").split(separator: ",") {
                     BreakpointWindowOpener.openWindow?(String(id))
+                }
+                // Regression check: delete every rule while its editor is on screen
+                if env["SNIFIX_SNAPSHOT_DELETE_RULES"] != nil {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                        MainActor.assumeIsolated {
+                            for r in model.rules.rules where r.kind == .mapLocal {
+                                withAnimation { model.rules.rules.removeAll { $0.id == r.id } }
+                            }
+                        }
+                    }
                 }
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {

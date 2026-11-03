@@ -246,6 +246,7 @@ final class AppModel {
     // Proxy state
     var proxyError: String?
     var systemProxyEnabled = false
+    var systemProxySwitching = false
     var recording = true { didSet { engine.recording = recording } }
     var caTrustedOnMac = false
     var iPhonesOnUSB: [String] = []
@@ -380,7 +381,7 @@ final class AppModel {
         do {
             try engine.start()
             proxyError = nil
-            if systemProxyEnabled { systemProxy.enable(port: settings.port) }
+            if systemProxyEnabled { setSystemProxy(true) }
             showToast("Прокси перезапущен на порту \(settings.port)")
         } catch {
             proxyError = "Порт \(settings.port) занят."
@@ -396,9 +397,22 @@ final class AppModel {
         flushRulesSave()
     }
 
+    /// Switches the Mac's proxy in the background; the button shows the new state right away.
     func setSystemProxy(_ on: Bool) {
-        if on { systemProxy.enable(port: settings.port) } else { systemProxy.disable() }
-        systemProxyEnabled = on
+        let proxy = systemProxy
+        let port = settings.port
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
+            systemProxyEnabled = on
+            systemProxySwitching = true
+        }
+        Task.detached {
+            if on { proxy.enable(port: port) } else { proxy.disable() }
+            await MainActor.run { [weak self] in
+                withAnimation(.easeOut(duration: 0.25)) { self?.systemProxySwitching = false }
+                self?.showToast(on ? "Трафик Mac идёт через Snifix" : "Mac ходит в интернет напрямую",
+                                symbol: on ? "macbook.and.iphone" : "macbook")
+            }
+        }
     }
 
     // MARK: - Flows
