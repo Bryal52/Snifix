@@ -547,7 +547,7 @@ struct FlowTable: View {
                     }
                     .width(min: 34, ideal: 44, max: 70)
                     TableColumn("", value: \.statusCode) { r in StatusIcon(row: r) }
-                        .width(18)
+                        .width(22)
                     TableColumn("URL", value: \.url) { r in
                         HStack(spacing: 5) {
                             if r.isSSL { Image(systemName: "lock.fill").font(.system(size: 9)).foregroundStyle(Theme.gold.opacity(0.8)) }
@@ -613,16 +613,27 @@ struct FlowTable: View {
 
 struct StatusIcon: View {
     let row: FlowRow
+
     var body: some View {
-        Group {
-            if row.isFailed { Image(systemName: "xmark.octagon.fill").foregroundStyle(.red) }
-            else if row.isPaused { Image(systemName: "pause.circle.fill").foregroundStyle(Theme.gold).symbolEffect(.pulse) }
-            else if row.isWebSocket { Image(systemName: "bolt.horizontal.fill").foregroundStyle(.purple) }
-            else if row.isTunnel { Image(systemName: "lock.shield").foregroundStyle(.secondary) }
-            else if row.isActive { ProgressView().controlSize(.mini) }
-            else { Circle().fill(Theme.statusColor(row.statusCode)).frame(width: 7, height: 7) }
+        // Every state uses the same 14 pt box, centered in the column
+        ZStack {
+            if row.isFailed {
+                Image(systemName: "xmark.circle.fill").foregroundStyle(.red)
+            } else if row.isPaused {
+                Image(systemName: "pause.circle.fill").foregroundStyle(Theme.gold).symbolEffect(.pulse)
+            } else if row.isWebSocket {
+                Image(systemName: "bolt.circle.fill").foregroundStyle(.purple)
+            } else if row.isTunnel {
+                Image(systemName: "lock.circle").foregroundStyle(.secondary)
+            } else if row.isActive {
+                ProgressView().controlSize(.mini).scaleEffect(0.75)
+            } else {
+                Circle().fill(Theme.statusColor(row.statusCode)).frame(width: 7, height: 7)
+            }
         }
-        .font(.system(size: 11))
+        .font(.system(size: 12))
+        .frame(width: 14, height: 14)
+        .frame(maxWidth: .infinity, alignment: .center)
     }
 }
 
