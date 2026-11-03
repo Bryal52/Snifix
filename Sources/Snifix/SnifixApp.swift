@@ -40,6 +40,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
                 if let sel = env["SNIFIX_SNAPSHOT_SELECT"], let id = Int(sel) { model.selection = [id] }
                 if let f = model.focusedFlow ?? model.selection.first.flatMap({ model.flows[$0] }) { ComposeState.shared.load(f) }
+                if let body = env["SNIFIX_SNAPSHOT_COMPOSE_BODY"] {
+                    ComposeState.shared.response?.body = body
+                    ComposeState.shared.response?.bodyEdited = true
+                    ComposeState.shared.responseEdited = true
+                }
                 // Only the look of the button: the Mac's network settings stay untouched
                 if env["SNIFIX_SNAPSHOT_PROXY_ON"] != nil { model.systemProxyEnabled = true }
                 for id in (env["SNIFIX_SNAPSHOT_WINDOWS"] ?? "").split(separator: ",") {

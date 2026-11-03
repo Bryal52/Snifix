@@ -164,7 +164,7 @@ struct RuleListView: View {
                 let rules = model.rules.rules.filter { $0.kind == kind && matchesFilter($0) }
                 if model.rules.rules.filter({ $0.kind == kind }).isEmpty {
                     EmptyState(symbol: tool.symbol, title: "No rules yet",
-                               subtitle: tool.help + "\nClick + or create a rule from a request (right-click → Tools).")
+                               subtitle: tool.help + "\nClick + or create a rule from a request (right-click → Create Rule).")
                 } else {
                     List(selection: $state.selectedRule) {
                         let ungrouped = rules.filter { r in r.groupID == nil || !model.rules.groups.contains { $0.id == r.groupID } }
@@ -172,7 +172,7 @@ struct RuleListView: View {
                             .onMove { from, to in move(from: from, to: to, in: ungrouped) }
                         ForEach(model.rules.groups) { group in
                             let inGroup = rules.filter { $0.groupID == group.id }
-                            if !inGroup.isEmpty || filter.isEmpty {
+                            if !inGroup.isEmpty || (filter.isEmpty && !model.rules.rules.contains { $0.groupID == group.id }) {
                                 Section {
                                     ForEach(inGroup) { rule in RuleRow(rule: rule).tag(rule.id) }
                                         .onMove { from, to in move(from: from, to: to, in: inGroup) }

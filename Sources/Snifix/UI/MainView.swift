@@ -767,7 +767,7 @@ struct FlowContextMenu: View {
             Button("Script for This Request…") { create(.script, f) }
             Button("Map Local (Mock Response)…") { create(.mapLocal, f) }
             Divider()
-            Menu("Tools") {
+            Menu("Create Rule") {
                 Button("Map Local") { create(.mapLocal, f) }
                 Button("Map Remote") { create(.mapRemote, f) }
                 Button("Rewrite") { create(.rewrite, f) }

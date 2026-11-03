@@ -110,7 +110,7 @@ struct MatchPreview: View {
         HStack(spacing: 6) {
             Image(systemName: matched.isEmpty ? "circle.dashed" : "checkmark.circle.fill")
                 .foregroundStyle(matched.isEmpty ? AnyShapeStyle(.secondary) : AnyShapeStyle(Theme.goldGradient))
-            Text(matched.isEmpty ? "No recorded requests match" : "Matches \(matched.count) recorded requests")
+            Text(matched.isEmpty ? "No recorded requests match" : "Matches \(matched.count) recorded \(matched.count == 1 ? "request" : "requests")")
                 .font(.system(size: 11)).foregroundStyle(.secondary)
             if let first = matched.last {
                 Text(first.request.url).font(.system(size: 10.5, design: .monospaced)).foregroundStyle(.tertiary)
@@ -156,7 +156,7 @@ struct MapLocalFields: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                FieldLabel(text: "Size")
+                FieldLabel(text: "Response")
                 Spacer()
                 Picker("", selection: $rule.mapLocal.source) {
                     Text("Text").tag(MapLocalSource.inline)
@@ -301,8 +301,8 @@ struct RewriteFields: View {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
                         Picker("", selection: step.target) {
-                            Text("Compose").tag(RewriteTarget.request)
-                            Text("Size").tag(RewriteTarget.response)
+                            Text("Request").tag(RewriteTarget.request)
+                            Text("Response").tag(RewriteTarget.response)
                         }
                         .pickerStyle(.segmented).labelsHidden().fixedSize()
                         Picker("", selection: step.operation) {

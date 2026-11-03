@@ -60,7 +60,8 @@ struct CopyField: View {
     @Environment(AppModel.self) private var model
     var body: some View {
         HStack {
-            Text(text).font(.system(size: 12.5, weight: .medium, design: .monospaced)).foregroundStyle(Theme.gold)
+            Text(text).font(.system(size: 11.5, weight: .medium, design: .monospaced)).foregroundStyle(Theme.gold)
+                .lineLimit(1).truncationMode(.middle).minimumScaleFactor(0.75)
                 .textSelection(.enabled)
             Spacer()
             Button { model.copy(text) } label: { Image(systemName: "doc.on.doc") }.buttonStyle(.borderless)

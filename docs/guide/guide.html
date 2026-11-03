@@ -1,0 +1,319 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Snifix — инструкция</title>
+<style>
+  @page { size: A4; margin: 16mm 15mm 16mm 15mm; }
+  :root {
+    --gold: #f5b81e; --amber: #ff9a1f; --ink: #1c1a22; --muted: #6b6676; --line: #ece8f2; --soft: #faf7ef;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 10pt/1.45 -apple-system, "SF Pro Text", "Helvetica Neue", Arial, sans-serif; color: var(--ink); }
+  h1, h2, h3 { line-height: 1.2; margin: 0; }
+  section { break-before: page; }
+  section.first { break-before: auto; }
+
+  /* Cover */
+  .cover { height: 255mm; display: flex; flex-direction: column; justify-content: center; align-items: flex-start; }
+  .cover img { width: 120px; height: 120px; margin-bottom: 22px; }
+  .cover h1 { font-size: 40pt; letter-spacing: -0.5px; }
+  .cover h1 span { background: linear-gradient(90deg, #f5b81e, #ff8a00); -webkit-background-clip: text; color: transparent; }
+  .cover .lead { font-size: 14pt; color: var(--muted); margin-top: 10px; max-width: 135mm; }
+  .toc { margin-top: 34px; border-left: 3px solid var(--gold); padding-left: 16px; }
+  .toc div { font-size: 11.5pt; margin: 6px 0; }
+  .toc b { color: var(--amber); display: inline-block; width: 22px; }
+
+  .kicker { font-size: 9pt; font-weight: 700; letter-spacing: 1.2px; text-transform: uppercase; color: var(--amber); }
+  h2 { font-size: 21pt; margin: 4px 0 8px; }
+  h3 { font-size: 12.5pt; margin: 16px 0 6px; }
+  p { margin: 6px 0; }
+  .intro { color: var(--muted); font-size: 11pt; margin-bottom: 10px; }
+
+  /* Screenshot with numbered marks */
+  figure { position: relative; margin: 8px auto 6px; border-radius: 10px; overflow: hidden;
+           box-shadow: 0 6px 22px rgba(20, 16, 30, .22); border: 1px solid #2a2633; break-inside: avoid; }
+  figure img { display: block; width: 100%; }
+  .mark { position: absolute; width: 22px; height: 22px; margin: -11px 0 0 -11px; border-radius: 50%;
+          background: linear-gradient(180deg, #ffd84a, #ff9a1f); color: #1a1204; font: 800 10.5pt/22px -apple-system, sans-serif;
+          text-align: center; border: 2px solid #fff; box-shadow: 0 2px 8px rgba(0,0,0,.45); }
+  .legend { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 18px; margin: 6px 0 4px; }
+  .legend div { display: flex; gap: 8px; align-items: baseline; font-size: 10pt; }
+  .legend .n { flex: none; width: 18px; height: 18px; border-radius: 50%; background: var(--gold); color: #1a1204;
+               font: 800 8.5pt/18px -apple-system, sans-serif; text-align: center; }
+  .legend.one { grid-template-columns: 1fr; }
+
+  ol.steps { counter-reset: s; list-style: none; padding: 0; margin: 8px 0; }
+  ol.steps li { counter-increment: s; position: relative; padding: 0 0 7px 34px; }
+  ol.steps li::before { content: counter(s); position: absolute; left: 0; top: 0; width: 22px; height: 22px; border-radius: 50%;
+                        background: var(--ink); color: var(--gold); font: 800 10pt/22px -apple-system, sans-serif; text-align: center; }
+  .btn { display: inline-block; padding: 0 7px; border-radius: 6px; background: #24212c; color: #ffd257;
+         font: 600 9.5pt/17px -apple-system, sans-serif; white-space: nowrap; }
+  .path { font-weight: 600; }
+  code, pre { font-family: "SF Mono", Menlo, monospace; }
+  code { background: #f3f0f7; padding: 1px 5px; border-radius: 4px; font-size: 9.3pt; }
+  pre { background: #16141d; color: #f2eefa; padding: 10px 12px; border-radius: 8px; font-size: 8.8pt; line-height: 1.5;
+        margin: 6px 0; white-space: pre-wrap; break-inside: avoid; }
+  pre .c { color: #8d879c; } pre .k { color: #ffcf4a; } pre .s { color: #8fdc8f; } pre .n { color: #8cc0ff; }
+
+  .tip, .warn { border-radius: 8px; padding: 8px 12px; margin: 10px 0; font-size: 10pt; break-inside: avoid; }
+  .tip { background: var(--soft); border-left: 4px solid var(--gold); }
+  .warn { background: #fff3ef; border-left: 4px solid #ff6a3d; }
+  .tip b:first-child, .warn b:first-child { display: block; margin-bottom: 2px; }
+
+  /* Fake context menu drawn in the style of macOS */
+  .menu { display: inline-block; background: #2a2730; color: #eee; border-radius: 9px; padding: 5px; font-size: 9.5pt;
+          box-shadow: 0 8px 26px rgba(0,0,0,.35); border: 1px solid #3c3845; vertical-align: top; }
+  .menu div { padding: 2px 22px 2px 10px; border-radius: 5px; }
+  .menu .sep { height: 1px; background: #403c49; margin: 4px 6px; padding: 0; }
+  .menu .on { background: linear-gradient(90deg, #f5b81e, #ff9a1f); color: #1a1204; font-weight: 600; }
+  .menu .dim { color: #8b8695; }
+  .row { display: flex; gap: 18px; align-items: flex-start; }
+  .row > .grow { flex: 1; }
+
+  table.trouble { width: 100%; border-collapse: collapse; font-size: 10pt; margin-top: 8px; }
+  table.trouble td { border-top: 1px solid var(--line); padding: 8px 6px; vertical-align: top; }
+  table.trouble td:first-child { width: 36%; font-weight: 600; }
+  .foot { color: var(--muted); font-size: 9pt; margin-top: 14px; }
+</style>
+</head>
+<body>
+
+<section class="first">
+  <div class="cover">
+    <img src="img/icon.png" alt="">
+    <h1><span>Snifix</span></h1>
+    <div class="lead">Пошаговая инструкция: как смотреть запросы приложения на iPhone, подменять ответы сервера и менять их скриптами.</div>
+    <div class="toc">
+      <div><b>1</b>Настройка Mac и iPhone</div>
+      <div><b>2</b>Главное окно</div>
+      <div><b>3</b>Map Local — подмена ответа</div>
+      <div><b>4</b>Edit &amp; Send — изменить запрос и ответ</div>
+      <div><b>5</b>Scripting — скрипты</div>
+      <div><b>6</b>Если что-то не работает</div>
+    </div>
+    <p class="foot" style="margin-top:40px">Кнопки и надписи в программе — на английском, в инструкции они выделены так: <span class="btn">Mock This Response</span>.</p>
+  </div>
+</section>
+
+<section>
+  <div class="kicker">Шаг 1</div>
+  <h2>Настройка Mac и iPhone</h2>
+  <p class="intro">Делается один раз. Snifix работает на Mac, а iPhone отправляет свои запросы через него. На iPhone ничего устанавливать не нужно, кроме сертификата.</p>
+
+  <h3>На Mac</h3>
+  <ol class="steps">
+    <li>Откройте Snifix. Вверху меню выберите <span class="path">Certificate → Install on This Mac…</span> и введите пароль Mac.</li>
+    <li>Нажмите кнопку <span class="btn">Mac: Off</span> на панели сверху. Она станет жёлтой — <span class="btn">Mac: On</span>: теперь трафик Mac тоже виден в Snifix. Для работы только с iPhone этот шаг можно пропустить.</li>
+  </ol>
+
+  <h3>На iPhone</h3>
+  <p>Нажмите <span class="btn">Devices</span> на панели сверху и выберите вкладку <b>iPhone</b>. Там те же шаги и ваш личный адрес:</p>
+  <figure style="width: 46%;">
+    <img src="img/devices.png" alt="">
+  </figure>
+  <ol class="steps">
+    <li>iPhone и Mac подключены к <b>одной и той же Wi-Fi сети</b>.</li>
+    <li>На iPhone: <span class="path">Настройки → Wi-Fi → (i) у вашей сети → Прокси → Авто</span>. В поле URL вставьте адрес из окна Devices (кнопка копирования справа от адреса).</li>
+    <li>Откройте камеру и наведите на QR-код в окне Devices, нажмите на ссылку и скачайте сертификат. Или откройте в Safari адрес <code>http://snifix.cert</code>.</li>
+    <li><span class="path">Настройки → Основные → VPN и управление устройством → Snifix CA → Установить</span>.</li>
+    <li><span class="path">Настройки → Основные → Об этом устройстве → Доверие сертификатам</span> → включите <b>Snifix CA</b>.</li>
+  </ol>
+  <div class="tip"><b>Важно про шаг 5</b>Без него Snifix видит только адреса, но не содержимое запросов. Надпись «Не проверено» у профиля на шаге 4 — это нормально.</div>
+  <div class="tip"><b>Когда идёт перехват</b>По умолчанию трафик iPhone идёт через Snifix, только пока iPhone подключён к Mac кабелем. Отключили кабель — iPhone ходит в интернет как обычно. Это меняется в окне Devices → <b>When to Capture</b>.</div>
+</section>
+
+<section>
+  <div class="kicker">Шаг 2</div>
+  <h2>Главное окно</h2>
+  <p class="intro">Каждая строка — один запрос: что приложение отправило и что ответил сервер.</p>
+  <figure>
+    <img src="img/main.png" alt="">
+    <span class="mark" style="left: 9.5%; top: 14.6%">1</span>
+    <span class="mark" style="left: 40.6%; top: 55%">2</span>
+    <span class="mark" style="left: 51%; top: 39%">3</span>
+    <span class="mark" style="left: 28.4%; top: 86%">4</span>
+    <span class="mark" style="left: 92%; top: 85%">5</span>
+    <span class="mark" style="left: 48.6%; top: 3%">6</span>
+  </figure>
+  <div class="legend">
+    <div><span class="n">1</span><span><b>Устройства.</b> Нажмите на устройство — увидите только его запросы. Внутри: приложения и домены. Правый клик — переименовать, сменить иконку, закрепить.</span></div>
+    <div><span class="n">4</span><span><b>Request</b> — что отправило приложение: заголовки, параметры, тело.</span></div>
+    <div><span class="n">2</span><span><b>Список запросов.</b> Зелёная точка — успешно, оранжевая — ошибка 4xx, красная — 5xx или сбой, замок — запрос не расшифрован.</span></div>
+    <div><span class="n">5</span><span><b>Response</b> — что ответил сервер. Вкладка <b>JSON</b> показывает ответ деревом.</span></div>
+    <div><span class="n">3</span><span><b>Жёлтая метка</b> — к запросу применилось правило (например, Map Local). Видно, какое именно.</span></div>
+    <div></div>
+  </div>
+  <div class="legend one" style="margin-top:2px">
+    <div><span class="n">6</span><span><b>Кнопки сверху, слева направо:</b> <span class="btn">Mac: On/Off</span> — показывать ли запросы самого Mac (жёлтая — включено) · <span class="btn">Compose</span> — новый запрос вручную · <span class="btn">Rules</span> — все правила: Map Local, Map Remote, Rewrite и другие · <span class="btn">Scripting</span> — скрипты · <span class="btn">Breakpoints</span> — остановленные запросы · <span class="btn">Devices</span> — подключение iPhone и Android.</span></div>
+  </div>
+  <h3>Полезно знать</h3>
+  <p><b>Двойной клик</b> по запросу открывает окно <span class="btn">Edit &amp; Send</span> (шаг 4). <b>Правый клик</b> по запросу — копировать URL или cURL, повторить запрос, создать правило.</p>
+  <p>Фильтры над списком: <span class="btn">JSON</span>, <span class="btn">Errors</span> и другие, справа — фильтр по коду ответа <span class="btn">Any Status</span>. Поиск — значок лупы в правом верхнем углу.</p>
+  <p><span class="btn">Recording</span> слева вверху ставит запись на паузу, корзина рядом очищает список.</p>
+</section>
+
+<section>
+  <div class="kicker">Шаг 3</div>
+  <h2>Map Local — подмена ответа</h2>
+  <p class="intro">Приложение получает ответ, который написали вы, а не настоящий ответ сервера. Так можно проверить, как приложение покажет VIP-клиента, пустой список, ошибку 500 и что угодно ещё — без помощи бэкенда.</p>
+
+  <div class="row">
+    <div class="grow">
+      <h3>Самый быстрый способ — из готового запроса</h3>
+      <ol class="steps">
+        <li>Найдите в списке нужный запрос (например, профиль).</li>
+        <li>Нажмите на него правой кнопкой → <span class="path">Map Local (Mock Response)…</span></li>
+        <li>Откроется окно правил. Ответ сервера уже скопирован в правило — остаётся поменять нужные поля.</li>
+        <li>Повторите действие в приложении (обновите экран). В списке у запроса появится жёлтая метка с именем правила.</li>
+      </ol>
+    </div>
+    <div class="menu">
+      <div>Copy URL</div><div>Copy as cURL</div><div>Copy Response Body</div>
+      <div class="sep"></div>
+      <div>Repeat</div><div>Edit &amp; Send…</div><div>Script for This Request…</div>
+      <div class="on">Map Local (Mock Response)…</div>
+      <div class="sep"></div>
+      <div>Create Rule ▸</div><div class="dim">Pin Domain</div>
+    </div>
+  </div>
+
+  <figure style="width: 66%;">
+    <img src="img/maplocal-crop.png" alt="">
+    <span class="mark" style="left: 43.4%; top: 13%">1</span>
+    <span class="mark" style="left: 22.8%; top: 19.4%">2</span>
+    <span class="mark" style="left: 38.2%; top: 27.9%">3</span>
+    <span class="mark" style="left: 94.2%; top: 26.6%">4</span>
+    <span class="mark" style="left: 50.8%; top: 37.6%">5</span>
+    <span class="mark" style="left: 75.6%; top: 58.1%">6</span>
+    <span class="mark" style="left: 79.6%; top: 64%">7</span>
+    <span class="mark" style="left: 86%; top: 90%">8</span>
+    <span class="mark" style="left: 80.4%; top: 17%">9</span>
+  </figure>
+  <div class="legend">
+    <div><span class="n">1</span><span><span class="btn">+</span> — новое правило. Стрелка рядом: новая группа, импорт и экспорт правил.</span></div>
+    <div><span class="n">6</span><span>Откуда брать ответ: <b>Text</b> — написать прямо здесь, <b>File</b> — из файла, <b>Folder</b> — из папки с моками.</span></div>
+    <div><span class="n">2</span><span><b>Группа.</b> Переключатель включает или выключает все правила группы сразу.</span></div>
+    <div><span class="n">7</span><span><b>Status</b> — код ответа. <span class="btn">Preset</span> — выбрать готовый: 200, 401, 404, 500…</span></div>
+    <div><span class="n">3</span><span><b>Правило.</b> Переключатель слева — включить или выключить только его.</span></div>
+    <div><span class="n">8</span><span><b>Body</b> — тело ответа. <span class="btn">Format JSON</span> выравнивает JSON.</span></div>
+    <div><span class="n">4</span><span><b>URL</b> — для какого адреса подменять. Звёздочка <code>*</code> заменяет любой текст.</span></div>
+    <div><span class="n">9</span><span><span class="btn">Enabled</span> — тот же переключатель, что и в списке.</span></div>
+    <div><span class="n">5</span><span><b>Methods</b> — только GET, только POST или <b>Any</b> (любой).</span></div>
+  </div>
+  <div class="tip"><b>Много моков</b>Сделайте отдельные правила для разных сценариев («VIP клиент», «Ошибка 500», «Пустой список») и сложите их в группу. Включайте одно — остальные выключены. Если в списке под адресом написано <i>Matches 1 recorded request</i>, адрес указан правильно.</div>
+</section>
+
+<section>
+  <div class="kicker">Шаг 4</div>
+  <h2>Edit &amp; Send — изменить запрос и ответ</h2>
+  <p class="intro">Откройте двойным кликом любой запрос из списка. Слева — запрос, справа — ответ сервера. Менять можно оба.</p>
+  <figure style="width: 88%;">
+    <img src="img/compose.png" alt="">
+    <span class="mark" style="left: 47%; top: 11.4%">1</span>
+    <span class="mark" style="left: 30%; top: 40%">2</span>
+    <span class="mark" style="left: 36%; top: 95.8%">3</span>
+    <span class="mark" style="left: 63.6%; top: 12%">4</span>
+    <span class="mark" style="left: 80%; top: 40%">5</span>
+    <span class="mark" style="left: 69.5%; top: 7.4%">6</span>
+    <span class="mark" style="left: 82.6%; top: 95.8%">7</span>
+  </figure>
+  <div class="legend">
+    <div><span class="n">1</span><span>Метод и адрес запроса — можно поменять.</span></div>
+    <div><span class="n">5</span><span>Тело ответа — меняйте как обычный текст.</span></div>
+    <div><span class="n">2</span><span>Вкладки <b>Headers</b> и <b>Body</b> — заголовки и тело запроса.</span></div>
+    <div><span class="n">6</span><span>Метка <b>edited</b> — ответ изменён вами.</span></div>
+    <div><span class="n">3</span><span><span class="btn">Send</span> (или ⌘↩) — отправить. Ответ сервера появится справа.</span></div>
+    <div><span class="n">7</span><span><span class="btn">Mock This Response</span> — приложение начнёт получать этот ответ.</span></div>
+    <div><span class="n">4</span><span><b>Status</b> — код ответа, например 500.</span></div>
+    <div></div>
+  </div>
+
+  <h3>Проверить, что будет, если сервер ответит иначе</h3>
+  <ol class="steps">
+    <li>Двойной клик по запросу (например, перевод денег).</li>
+    <li>Справа поменяйте ответ: например, напишите ошибку «Недостаточно средств» или поставьте <b>Status</b> 500.</li>
+    <li>Нажмите <span class="btn">Mock This Response</span>. Внизу появится подсказка «The app now receives this response».</li>
+    <li>Повторите действие в приложении на iPhone — оно получит ваш ответ.</li>
+    <li>Чтобы вернуть настоящий сервер, нажмите <span class="btn">Stop Mocking</span>. Кнопка <span class="btn">Restore Server Response</span> возвращает исходный текст ответа в окне.</li>
+  </ol>
+  <div class="tip"><b>Как это устроено</b><span class="btn">Mock This Response</span> создаёт обычное правило Map Local. Его можно найти и поправить позже в <span class="btn">Rules</span> → Map Local.</div>
+</section>
+
+<section>
+  <div class="kicker">Шаг 5</div>
+  <h2>Scripting — скрипты</h2>
+  <p class="intro">Когда нужно не заменить ответ целиком, а поменять одно поле, добавить заголовок или сделать что-то по условию. Скрипт пишется на JavaScript и срабатывает сам на каждый подходящий запрос.</p>
+  <figure style="width: 88%;">
+    <img src="img/script.png" alt="">
+    <span class="mark" style="left: 13%; top: 29%">1</span>
+    <span class="mark" style="left: 53.3%; top: 10.4%">2</span>
+    <span class="mark" style="left: 95.2%; top: 21.3%">3</span>
+    <span class="mark" style="left: 92%; top: 61%">4</span>
+    <span class="mark" style="left: 92%; top: 82.5%">5</span>
+    <span class="mark" style="left: 62.3%; top: 37.4%">6</span>
+  </figure>
+  <div class="legend">
+    <div><span class="n">1</span><span><b>Scripting</b> в окне правил (кнопка <span class="btn">Scripting</span> наверху).</span></div>
+    <div><span class="n">4</span><span><code>onRequest</code> — меняет запрос до отправки на сервер.</span></div>
+    <div><span class="n">2</span><span><span class="btn">+</span> — новый скрипт. Или правый клик по запросу → <span class="path">Script for This Request…</span></span></div>
+    <div><span class="n">5</span><span><code>onResponse</code> — меняет ответ до того, как его получит приложение.</span></div>
+    <div><span class="n">3</span><span><b>URL</b> — к каким адресам применять скрипт.</span></div>
+    <div><span class="n">6</span><span>Сколько записанных запросов подходит под адрес.</span></div>
+  </div>
+  <p>Скрипт сохраняется сам, отдельной кнопки нет. Под редактором есть <b>Log</b>: туда пишет <code>console.log(...)</code> и туда же попадают ошибки скрипта.</p>
+
+</section>
+
+<section>
+  <div class="kicker">Шаг 5 · продолжение</div>
+  <h2>Готовые примеры скриптов</h2>
+  <p class="intro">Создайте скрипт (кнопка <span class="btn">+</span> в Scripting), укажите URL и замените текст в редакторе одним из примеров.</p>
+  <p>Поменять поле в JSON-ответе:</p>
+<pre><span class="k">function</span> onResponse(context, url, request, response) {
+  response.body.status = <span class="s">"VIP"</span>;
+  response.body.balance = <span class="n">0</span>;
+  <span class="k">return</span> response;
+}</pre>
+  <p>Вернуть ошибку сервера:</p>
+<pre><span class="k">function</span> onResponse(context, url, request, response) {
+  response.statusCode = <span class="n">500</span>;
+  response.body = { error: <span class="s">"internal"</span> };
+  <span class="k">return</span> response;
+}</pre>
+  <p>Добавить заголовок к запросу и удалить поле из ответа:</p>
+<pre><span class="k">function</span> onRequest(context, url, request) {
+  request.headers[<span class="s">"X-Test-Mode"</span>] = <span class="s">"1"</span>;
+  <span class="k">return</span> request;
+}
+<span class="k">function</span> onResponse(context, url, request, response) {
+  <span class="k">delete</span> response.body.promo;   <span class="c">// убрать баннер</span>
+  console.log(<span class="s">"promo removed for "</span> + url);
+  <span class="k">return</span> response;
+}</pre>
+  <p>Подменить ответ только для конкретного запроса (например, при определённом параметре):</p>
+<pre><span class="k">function</span> onResponse(context, url, request, response) {
+  <span class="k">if</span> (url.includes(<span class="s">"page=2"</span>)) {
+    response.body.items = [];            <span class="c">// вторая страница пустая</span>
+  }
+  <span class="k">return</span> response;
+}</pre>
+  <div class="tip"><b>Главное правило</b>Функция всегда должна заканчиваться строкой <code>return request;</code> или <code>return response;</code>. Если JSON-ответ — объект, обращайтесь к полям через точку: <code>response.body.name</code>.</div>
+</section>
+
+<section>
+  <div class="kicker">Шаг 6</div>
+  <h2>Если что-то не работает</h2>
+  <table class="trouble">
+    <tr><td>С iPhone не приходит ни одного запроса</td><td>Проверьте, что iPhone и Mac в одной Wi-Fi сети, а в настройках Wi-Fi iPhone прокси стоит «Авто» с адресом из окна Devices. В режиме по умолчанию iPhone должен быть подключён к Mac кабелем.</td></tr>
+    <tr><td>Жёлтая плашка «does not trust the Snifix certificate»</td><td>На iPhone не включено <span class="path">Доверие сертификатам → Snifix CA</span> (шаг 1, пункт 5). Включите и нажмите в плашке <span class="btn">Retry</span>.</td></tr>
+    <tr><td>Запрос показан как <b>Tunnel without decryption</b></td><td>Содержимое этого запроса не расшифровано. Так всегда бывает с сервисами Apple — это нормально. Если так с вашим приложением, а у Safari запросы видны, значит в приложении стоит защита от перехвата (пиннинг). Нужна тестовая сборка без неё — попросите разработчиков.</td></tr>
+    <tr><td>Правило Map Local не срабатывает</td><td>Проверьте, что включены и правило, и его группа, адрес совпадает (под адресом должно быть <i>Matches … recorded request</i>) и выбран правильный метод. Обновите экран в приложении.</td></tr>
+    <tr><td>Нужно вернуть всё как было</td><td>Выключите правила или нажмите <span class="btn">Stop Mocking</span>. Если закрыть Snifix, iPhone и Mac сразу ходят в интернет напрямую.</td></tr>
+    <tr><td>Пропал интернет на Android после отключения кабеля</td><td>Подключите кабель обратно и нажмите в Devices → Android <span class="btn">Disconnect</span>. В следующий раз нажимайте его до того, как вынуть кабель.</td></tr>
+  </table>
+  <div class="warn"><b>Осторожно с реальными данными</b>В перехваченных запросах видны токены, номера карт и личные данные. Тестируйте на тестовых аккаунтах и не пересылайте сохранённые сессии с боевыми данными.</div>
+</section>
+
+</body>
+</html>
