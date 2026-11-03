@@ -33,7 +33,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if let last = model.visibleRows.first(where: { $0.method == "POST" }) ?? model.visibleRows.first {
                     model.selection = [last.id]
                 }
-                if let rule = model.rules.rules.first { RulesState.shared.tool = RulesTool(kind: rule.kind); RulesState.shared.selectedRule = rule.id }
+                let pick = env["SNIFIX_SNAPSHOT_RULE"].flatMap(UUID.init(uuidString:))
+                if let rule = model.rules.rules.first(where: { $0.id == pick }) ?? model.rules.rules.first {
+                    RulesState.shared.tool = RulesTool(kind: rule.kind)
+                    RulesState.shared.selectedRule = rule.id
+                }
+                if let sel = env["SNIFIX_SNAPSHOT_SELECT"], let id = Int(sel) { model.selection = [id] }
                 if let f = model.focusedFlow ?? model.selection.first.flatMap({ model.flows[$0] }) { ComposeState.shared.load(f) }
                 // Only the look of the button: the Mac's network settings stay untouched
                 if env["SNIFIX_SNAPSHOT_PROXY_ON"] != nil { model.systemProxyEnabled = true }
@@ -54,7 +59,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
                 for (i, w) in NSApp.windows.enumerated() where w.isVisible {
                     guard let view = w.contentView?.superview ?? w.contentView,
-                          let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { continue }
+                          let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(view.bounds.width * 2),
+                                                     pixelsHigh: Int(view.bounds.height * 2), bitsPerSample: 8, samplesPerPixel: 4,
+                                                     hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)
+                    else { continue }
+                    // Retina-sharp pictures for the user guide
+                    rep.size = view.bounds.size
                     view.cacheDisplay(in: view.bounds, to: rep)
                     let name = w.title.isEmpty ? "window\(i)" : w.title
                     try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: dir).appendingPathComponent("\(name).png"))
@@ -86,22 +96,22 @@ struct SnifixApp: App {
         .defaultSize(width: 1400, height: 860)
         .commands { SnifixCommands(model: model) }
 
-        Window("Правила", id: "rules") {
+        Window("Rules", id: "rules") {
             RulesView().environment(model).tint(Theme.gold)
         }
         .defaultSize(width: 1100, height: 700)
 
-        Window("Точки останова", id: "breakpoints") {
+        Window("Breakpoints", id: "breakpoints") {
             BreakpointsView().environment(model).tint(Theme.gold)
         }
         .defaultSize(width: 900, height: 620)
 
-        Window("Изменить и отправить", id: "compose") {
+        Window("Edit & Send", id: "compose") {
             ComposeView().environment(model).tint(Theme.gold)
         }
         .defaultSize(width: 1100, height: 680)
 
-        Window("Устройства", id: "devices") {
+        Window("Devices", id: "devices") {
             DevicesView().environment(model).tint(Theme.gold)
         }
         .defaultSize(width: 680, height: 700)
@@ -118,26 +128,26 @@ struct SnifixCommands: Commands {
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
-            Button("Новый запрос") { ComposeState.shared.newRequest(); openWindow(id: "compose") }
+            Button("New Request") { ComposeState.shared.newRequest(); openWindow(id: "compose") }
                 .keyboardShortcut("n")
             Divider()
-            Button("Открыть сессию…") {
+            Button("Open Session…") {
                 let panel = NSOpenPanel()
                 panel.allowedContentTypes = [UTType(filenameExtension: "snifix") ?? .json, .json]
                 if panel.runModal() == .OK, let url = panel.url { model.openSession(url) }
             }
             .keyboardShortcut("o")
-            Button("Сохранить сессию…") {
+            Button("Save Session…") {
                 let panel = NSSavePanel()
-                panel.nameFieldStringValue = "Сессия.snifix"
+                panel.nameFieldStringValue = "Session.snifix"
                 if panel.runModal() == .OK, let url = panel.url {
                     let list = model.rows.compactMap { model.flows[$0.id] }
                     model.saveSession(to: url, flows: list)
-                    model.showToast("Сессия сохранена: \(list.count) запросов")
+                    model.showToast("Session saved: \(list.count) requests")
                 }
             }
             .keyboardShortcut("s")
-            Button("Экспорт всех в HAR…") {
+            Button("Export All as HAR…") {
                 let panel = NSSavePanel()
                 panel.nameFieldStringValue = "Snifix.har"
                 if panel.runModal() == .OK, let url = panel.url {
@@ -145,45 +155,45 @@ struct SnifixCommands: Commands {
                 }
             }
         }
-        CommandMenu("Прокси") {
-            Button(model.recording ? "Остановить запись" : "Начать запись") { model.recording.toggle() }
+        CommandMenu("Proxy") {
+            Button(model.recording ? "Stop Recording" : "Start Recording") { model.recording.toggle() }
                 .keyboardShortcut("r")
-            Button("Очистить") { model.clear() }
+            Button("Clear") { model.clear() }
                 .keyboardShortcut("k")
             Divider()
-            Button(model.systemProxyEnabled ? "Выключить перехват Mac" : "Включить перехват Mac") {
+            Button(model.systemProxyEnabled ? "Stop Capturing Mac Traffic" : "Capture Mac Traffic") {
                 model.setSystemProxy(!model.systemProxyEnabled)
             }
             .keyboardShortcut("p", modifiers: [.command, .shift])
             Divider()
-            Button("Повторить выбранный") { for f in model.selectedFlows() { model.repeatRequest(f.request) } }
+            Button("Repeat Selected") { for f in model.selectedFlows() { model.repeatRequest(f.request) } }
                 .keyboardShortcut("r", modifiers: [.command, .shift])
-            Button("Копировать как cURL") {
-                if let f = model.focusedFlow { model.copy(Export.curl(f.request), note: "cURL скопирован") }
+            Button("Copy as cURL") {
+                if let f = model.focusedFlow { model.copy(Export.curl(f.request), note: "cURL copied") }
             }
             .keyboardShortcut("c", modifiers: [.command, .shift])
         }
-        CommandMenu("Инструменты") {
+        CommandMenu("Tools") {
             tool("Map Local", .mapLocal, "l")
             tool("Map Remote", .mapRemote, "m")
             tool("Rewrite", .rewrite, "w")
-            tool("Точки останова", .breakpoint, "b")
-            tool("Скрипты", .script, "i")
-            tool("Блокировка", .block, "j")
-            tool("Медленная сеть", .throttle, "t")
+            tool("Breakpoints", .breakpoint, "b")
+            tool("Scripting", .script, "i")
+            tool("Block List", .block, "j")
+            tool("Network Conditions", .throttle, "t")
             Divider()
-            tool("Исключения SSL", .sslBypass, nil)
+            tool("SSL Bypass", .sslBypass, nil)
             tool("Allow-list", .allowList, nil)
             tool("DNS", .dns, nil)
             Divider()
-            Button("Остановленные запросы") { openWindow(id: "breakpoints") }
+            Button("Paused Requests") { openWindow(id: "breakpoints") }
         }
-        CommandMenu("Сертификат") {
-            Button("Установить на этот Mac…") { model.trustCertificateOnMac() }
-            Button("Подключить iPhone…") { openWindow(id: "devices") }
-            Button("Подключить Android…") { openWindow(id: "devices") }
+        CommandMenu("Certificate") {
+            Button("Install on This Mac…") { model.trustCertificateOnMac() }
+            Button("Connect iPhone…") { openWindow(id: "devices") }
+            Button("Connect Android…") { openWindow(id: "devices") }
             Divider()
-            Button("Экспорт сертификата…") {
+            Button("Export Certificate…") {
                 let panel = NSSavePanel()
                 panel.nameFieldStringValue = "Snifix-CA.pem"
                 if panel.runModal() == .OK, let url = panel.url { try? model.ca.certificatePEM.write(to: url, atomically: true, encoding: .utf8) }

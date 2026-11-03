@@ -49,7 +49,7 @@ struct FlowRow: Identifiable, Hashable {
         isSSL = f.isSSL
         category = ContentCategory.of(request: f.request, response: f.response)
         appName = f.client.appName ?? f.client.address
-        deviceName = f.client.deviceName ?? (f.client.isLocal ? "Mac" : "Устройство")
+        deviceName = f.client.deviceName ?? (f.client.isLocal ? "Mac" : "Device")
         deviceKey = f.client.isLocal ? "Mac" : f.client.address
         appPath = f.client.bundlePath
         isRemote = !f.client.isLocal
@@ -62,13 +62,13 @@ struct FlowRow: Identifiable, Hashable {
         errorText = ""
         isFailed = false; isPaused = false; isTunnel = false; isActive = false
         switch f.state {
-        case .failed(let m): isFailed = true; errorText = m; statusText = "Ошибка"
-        case .paused: isPaused = true; statusText = "Пауза"
-        case .tunnel: isTunnel = true; statusText = f.completedAt == nil ? "Туннель" : "Туннель закрыт"
+        case .failed(let m): isFailed = true; errorText = m; statusText = "Error"
+        case .paused: isPaused = true; statusText = "Paused"
+        case .tunnel: isTunnel = true; statusText = f.completedAt == nil ? "Tunnel" : "Tunnel closed"
         case .active: isActive = true; statusText = f.isWebSocket && f.response != nil ? "WebSocket" : "…"
         case .completed: statusText = f.response.map { "\($0.statusCode)" } ?? "—"
         }
-        if f.isWebSocket && f.response?.statusCode == 101 { statusText = f.completedAt == nil ? "WebSocket" : "WS закрыт" }
+        if f.isWebSocket && f.response?.statusCode == 101 { statusText = f.completedAt == nil ? "WebSocket" : "WS closed" }
     }
 }
 
@@ -82,7 +82,7 @@ enum SidebarItem: Hashable {
 }
 
 enum SidebarSort: String, CaseIterable, Identifiable {
-    case name = "По имени", count = "По количеству", recent = "По активности"
+    case name = "By Name", count = "By Count", recent = "By Activity"
     var id: String { rawValue }
 }
 
@@ -109,15 +109,15 @@ enum DeviceIcon: String, Codable, CaseIterable, Identifiable {
     var id: String { rawValue }
     var title: String {
         switch self {
-        case .auto: return "Автоматически"
-        case .apple: return "Яблоко"
+        case .auto: return "Automatic"
+        case .apple: return "Apple"
         case .android: return "Android"
-        case .laptop: return "Ноутбук"
-        case .server: return "Сервер"
+        case .laptop: return "Laptop"
+        case .server: return "Server"
         case .iphone: return "iPhone"
         case .ipad: return "iPad"
-        case .desktop: return "Компьютер"
-        case .network: return "Сеть"
+        case .desktop: return "Desktop"
+        case .network: return "Network"
         }
     }
     /// SF Symbol; Android is drawn separately (there is no system symbol for it).
@@ -166,8 +166,8 @@ struct SidebarDevice: Identifiable, Hashable {
 }
 
 enum CategoryFilter: String, CaseIterable, Identifiable {
-    case all = "Все", json = "JSON", form = "Form", xml = "XML", js = "JS", css = "CSS", graphql = "GraphQL",
-         document = "Документы", image = "Картинки", media = "Медиа", websocket = "WebSocket", errors = "Ошибки"
+    case all = "All", json = "JSON", form = "Form", xml = "XML", js = "JS", css = "CSS", graphql = "GraphQL",
+         document = "Document", image = "Image", media = "Media", websocket = "WebSocket", errors = "Errors"
     var id: String { rawValue }
 
     func matches(_ r: FlowRow) -> Bool {
@@ -189,7 +189,7 @@ enum CategoryFilter: String, CaseIterable, Identifiable {
 }
 
 enum StatusFilter: String, CaseIterable, Identifiable {
-    case all = "Любой код", ok = "2xx", redirect = "3xx", client = "4xx", server = "5xx"
+    case all = "Any Status", ok = "2xx", redirect = "3xx", client = "4xx", server = "5xx"
     var id: String { rawValue }
     func matches(_ code: Int) -> Bool {
         switch self {
@@ -299,7 +299,7 @@ final class AppModel {
             ?? fm.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Snifix")
         try? fm.createDirectory(at: supportDirectory, withIntermediateDirectories: true)
         let testCopy = ProcessInfo.processInfo.environment["SNIFIX_HOME"] != nil
-        ca = try! CertificateAuthority(directory: supportDirectory, name: testCopy ? "Snifix Test CA (не для телефона)" : nil)
+        ca = try! CertificateAuthority(directory: supportDirectory, name: testCopy ? "Snifix Test CA (not for phones)" : nil)
         let loadedSettings = Self.load(ProxySettings.self, "settings.json", in: supportDirectory) ?? ProxySettings()
         let loadedRules = Self.load(RulesDocument.self, "rules.json", in: supportDirectory) ?? RulesDocument()
         settings = loadedSettings
@@ -317,7 +317,7 @@ final class AppModel {
             Task { @MainActor in
                 guard let self else { return }
                 withAnimation(.spring(response: 0.45, dampingFraction: 0.8)) {
-                    self.untrustedDevices[address] = hint ?? (address == "127.0.0.1" ? "Mac" : "Устройство")
+                    self.untrustedDevices[address] = hint ?? (address == "127.0.0.1" ? "Mac" : "Device")
                 }
                 NSApp.requestUserAttention(.informationalRequest)
             }
@@ -325,9 +325,9 @@ final class AppModel {
         engine.onTrustedClient = { [weak self] address in
             Task { @MainActor in
                 guard let self else { return }
-                let name = self.untrustedDevices[address] ?? "Устройство"
+                let name = self.untrustedDevices[address] ?? "Device"
                 withAnimation(.spring(response: 0.45, dampingFraction: 0.8)) { _ = self.untrustedDevices.removeValue(forKey: address) }
-                self.showToast("\(name) доверяет сертификату — HTTPS расшифровывается", symbol: "checkmark.seal.fill")
+                self.showToast("\(name) trusts the certificate — HTTPS is decrypted", symbol: "checkmark.seal.fill")
             }
         }
         let pac = pacFlag
@@ -363,7 +363,7 @@ final class AppModel {
             try engine.start()
             proxyError = nil
         } catch {
-            proxyError = "Порт \(settings.port) занят. Закройте другой прокси (например Proxyman) или смените порт в настройках."
+            proxyError = "Port \(settings.port) is in use. Quit the other proxy (e.g. Proxyman) or change the port in Settings."
         }
         // Without a trusted certificate every HTTPS site on the Mac would break, so wait for it
         if proxyError == nil && settings.enableSystemProxyOnLaunch && caTrustedOnMac { setSystemProxy(true) }
@@ -382,9 +382,9 @@ final class AppModel {
             try engine.start()
             proxyError = nil
             if systemProxyEnabled { setSystemProxy(true) }
-            showToast("Прокси перезапущен на порту \(settings.port)")
+            showToast("Proxy restarted on port \(settings.port)")
         } catch {
-            proxyError = "Порт \(settings.port) занят."
+            proxyError = "Port \(settings.port) is in use."
         }
     }
 
@@ -409,7 +409,7 @@ final class AppModel {
             if on { proxy.enable(port: port) } else { proxy.disable() }
             await MainActor.run { [weak self] in
                 withAnimation(.easeOut(duration: 0.25)) { self?.systemProxySwitching = false }
-                self?.showToast(on ? "Трафик Mac идёт через Snifix" : "Mac ходит в интернет напрямую",
+                self?.showToast(on ? "Mac traffic goes through Snifix" : "Mac traffic goes direct",
                                 symbol: on ? "macbook.and.iphone" : "macbook")
             }
         }
@@ -480,11 +480,11 @@ final class AppModel {
         let leaves = { (m: [String: (Int, Date)]) in self.sorted(m.map { SidebarLeaf(name: $0.key, count: $0.value.0, last: $0.value.1) }) }
         var tree: [SidebarDevice] = acc.map { key, d in
             // Name devices by what most of their requests say (User-Agent), plus the address
-            let name = d.names.filter { $0.key != "Устройство" }.max { $0.value < $1.value }?.key ?? d.names.keys.first ?? "Устройство"
+            let name = d.names.filter { $0.key != "Device" }.max { $0.value < $1.value }?.key ?? d.names.keys.first ?? "Device"
             let android = androidDevices.filter(\.proxied)
             let label: String
             let detail: String
-            if key == "Mac" { label = "Этот Mac"; detail = "" }
+            if key == "Mac" { label = "This Mac"; detail = "" }
             else if key == "USB" { label = android.count == 1 ? android[0].model : "Android"; detail = "USB" }
             else { label = name == "Mac" ? "Mac" : name; detail = key }
             let profile = deviceProfiles[key] ?? DeviceProfile()
@@ -588,7 +588,7 @@ final class AppModel {
     func repeatRequest(_ request: RequestData) {
         let engine = self.engine
         Task.detached { await engine.replay(request) }
-        showToast("Запрос отправлен повторно", symbol: "arrow.clockwise.circle.fill")
+        showToast("Request sent again", symbol: "arrow.clockwise.circle.fill")
     }
 
     // MARK: - Sessions
@@ -603,7 +603,7 @@ final class AppModel {
         let dec = JSONDecoder()
         dec.dateDecodingStrategy = .iso8601
         guard let data = try? Data(contentsOf: url), let list = try? dec.decode([FlowData].self, from: data) else {
-            showToast("Не удалось открыть файл сессии", symbol: "exclamationmark.triangle.fill")
+            showToast("Could not open the session file", symbol: "exclamationmark.triangle.fill")
             return
         }
         recording = false
@@ -615,7 +615,7 @@ final class AppModel {
         }
         rebuildSummaries()
         refreshVisible()
-        showToast("Открыто \(list.count) запросов · запись на паузе")
+        showToast("Opened \(list.count) requests · recording paused")
     }
 
     // MARK: - Rules
@@ -675,14 +675,14 @@ final class AppModel {
                 guard let self else { return }
                 if iphones != self.iPhonesOnUSB {
                     if !iphones.isEmpty && self.iPhonesOnUSB.isEmpty && self.settings.iPhoneMode == .usbOnly {
-                        self.showToast("\(iphones[0]) подключён — перехват включён", symbol: "iphone")
+                        self.showToast("\(iphones[0]) connected — capturing", symbol: "iphone")
                     } else if iphones.isEmpty && self.settings.iPhoneMode == .usbOnly {
-                        self.showToast("iPhone отключён — трафик идёт напрямую", symbol: "iphone.slash")
+                        self.showToast("iPhone disconnected — traffic goes direct", symbol: "iphone.slash")
                     }
                     self.iPhonesOnUSB = iphones
                     self.updatePAC()
                 }
-                for d in newlyConnected { self.showToast("\(d.model): трафик идёт через USB", symbol: "cable.connector") }
+                for d in newlyConnected { self.showToast("\(d.model): traffic goes over USB", symbol: "cable.connector") }
                 self.androidDevices = list
                 self.localAddress = NetworkInfo.primaryAddress() ?? "127.0.0.1"
             }
@@ -695,13 +695,13 @@ final class AppModel {
         var s = settings
         s.androidAutoConnect = false
         settings = s
-        showToast("\(device.model): прокси выключен")
+        showToast("\(device.model): proxy off")
     }
 
     func connectAndroid(_ device: AndroidDevice) {
         let ok = android.connect(device.serial, port: settings.port)
         if let i = androidDevices.firstIndex(of: device) { androidDevices[i].proxied = ok }
-        showToast(ok ? "\(device.model): подключён через USB" : "Не удалось настроить прокси на \(device.model)",
+        showToast(ok ? "\(device.model): connected over USB" : "Could not set the proxy on \(device.model)",
                   symbol: ok ? "cable.connector" : "exclamationmark.triangle.fill")
     }
 
@@ -713,7 +713,7 @@ final class AppModel {
                 guard let self else { return }
                 self.caTrustedOnMac = CertificateTrust.isTrusted(der)
                 if self.caTrustedOnMac && !self.systemProxyEnabled && self.settings.enableSystemProxyOnLaunch { self.setSystemProxy(true) }
-                self.showToast(error ?? "Сертификат установлен и доверен",
+                self.showToast(error ?? "Certificate installed and trusted",
                                 symbol: error == nil ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
             }
         }
@@ -735,7 +735,7 @@ final class AppModel {
     func retryTrust(_ address: String) {
         engine.clearAutoBypass(client: address)
         withAnimation(.spring(response: 0.45, dampingFraction: 0.8)) { _ = untrustedDevices.removeValue(forKey: address) }
-        showToast("Пробуем снова — откройте приложение на телефоне", symbol: "arrow.clockwise.circle.fill")
+        showToast("Retrying — open the app on the phone", symbol: "arrow.clockwise.circle.fill")
     }
 
     // MARK: - Misc
@@ -749,7 +749,7 @@ final class AppModel {
         }
     }
 
-    func copy(_ text: String, note: String = "Скопировано") {
+    func copy(_ text: String, note: String = "Copied") {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
         showToast(note, symbol: "doc.on.doc.fill")

@@ -37,11 +37,11 @@ enum RulesTool: Hashable, CaseIterable, Identifiable {
         case .mapLocal: return "Map Local"
         case .mapRemote: return "Map Remote"
         case .rewrite: return "Rewrite"
-        case .breakpoint: return "Точки останова"
-        case .script: return "Скрипты"
-        case .block: return "Блокировка"
-        case .throttle: return "Медленная сеть"
-        case .sslBypass: return "Исключения SSL"
+        case .breakpoint: return "Breakpoints"
+        case .script: return "Scripting"
+        case .block: return "Block List"
+        case .throttle: return "Network Conditions"
+        case .sslBypass: return "SSL Bypass"
         case .allowList: return "Allow-list"
         case .dns: return "DNS"
         }
@@ -64,16 +64,16 @@ enum RulesTool: Hashable, CaseIterable, Identifiable {
 
     var help: String {
         switch self {
-        case .mapLocal: return "Ответ берётся из текста, файла или папки на Mac — сервер не вызывается."
-        case .mapRemote: return "Запрос уходит на другой хост, порт или путь (например, prod → staging)."
-        case .rewrite: return "Меняет заголовки, query, тело и код ответа на лету."
-        case .breakpoint: return "Останавливает запрос или ответ, чтобы изменить его вручную."
-        case .script: return "JavaScript-функции onRequest / onResponse для любой логики."
-        case .block: return "Возвращает 403/404 или обрывает соединение."
-        case .throttle: return "Добавляет задержку и ограничивает скорость ответа."
-        case .sslBypass: return "Эти хосты не расшифровываются — трафик идёт туннелем как есть."
-        case .allowList: return "Если включено, записываются и расшифровываются только эти хосты."
-        case .dns: return "Подключаться к указанному IP вместо настоящего адреса хоста."
+        case .mapLocal: return "The response comes from text, a file or a folder on the Mac — the server is not called."
+        case .mapRemote: return "The request goes to another host, port or path (e.g. prod → staging)."
+        case .rewrite: return "Changes headers, query, body and status code on the fly."
+        case .breakpoint: return "Pauses a request or response so you can edit it by hand."
+        case .script: return "JavaScript onRequest / onResponse functions for any logic."
+        case .block: return "Returns 403/404 or drops the connection."
+        case .throttle: return "Adds latency and limits the response speed."
+        case .sslBypass: return "These hosts are not decrypted — traffic is tunneled as is."
+        case .allowList: return "When on, only these hosts are recorded and decrypted."
+        case .dns: return "Connect to this IP instead of the host's real address."
         }
     }
 }
@@ -93,13 +93,13 @@ struct RulesView: View {
     var body: some View {
         NavigationSplitView {
             List(selection: $state.tool) {
-                Section("Правила") {
+                Section("Rules") {
                     ForEach(RulesTool.allCases.filter { $0.kind != nil }) { tool in
                         toolRow(tool, count: model.rules.rules.filter { $0.kind == tool.kind }.count,
                                 active: model.rules.activeRules(tool.kind!).count)
                     }
                 }
-                Section("Трафик") {
+                Section("Traffic") {
                     toolRow(.sslBypass, count: model.rules.sslBypass.count, active: model.rules.sslBypass.count)
                     toolRow(.allowList, count: model.rules.allowList.count, active: model.rules.allowListEnabled ? model.rules.allowList.count : 0)
                     toolRow(.dns, count: model.rules.dnsOverrides.count, active: model.rules.dnsOverrides.filter(\.enabled).count)
@@ -110,13 +110,13 @@ struct RulesView: View {
             Group {
                 switch state.tool {
                 case .sslBypass:
-                    HostListEditor(title: "Исключения SSL", help: RulesTool.sslBypass.help,
+                    HostListEditor(title: "SSL Bypass", help: RulesTool.sslBypass.help,
                                    items: Binding(get: { model.rules.sslBypass }, set: { model.rules.sslBypass = $0 }),
                                    extra: AnyView(AutoBypassList()))
                 case .allowList:
                     HostListEditor(title: "Allow-list", help: RulesTool.allowList.help,
                                    items: Binding(get: { model.rules.allowList }, set: { model.rules.allowList = $0 }),
-                                   extra: AnyView(Toggle("Включить allow-list", isOn: Binding(
+                                   extra: AnyView(Toggle("Enable Allow List", isOn: Binding(
                                     get: { model.rules.allowListEnabled }, set: { model.rules.allowListEnabled = $0 })).toggleStyle(.switch)))
                 case .dns:
                     DNSEditor()
@@ -163,8 +163,8 @@ struct RuleListView: View {
                 Divider()
                 let rules = model.rules.rules.filter { $0.kind == kind && matchesFilter($0) }
                 if model.rules.rules.filter({ $0.kind == kind }).isEmpty {
-                    EmptyState(symbol: tool.symbol, title: "Правил пока нет",
-                               subtitle: tool.help + "\nНажмите «+» или создайте правило из запроса (правый клик → Создать правило).")
+                    EmptyState(symbol: tool.symbol, title: "No rules yet",
+                               subtitle: tool.help + "\nClick + or create a rule from a request (right-click → Tools).")
                 } else {
                     List(selection: $state.selectedRule) {
                         let ungrouped = rules.filter { r in r.groupID == nil || !model.rules.groups.contains { $0.id == r.groupID } }
@@ -194,7 +194,7 @@ struct RuleListView: View {
                         .id(id)
                         .transition(.opacity.combined(with: .move(edge: .trailing)))
                 } else {
-                    EmptyState(symbol: "hand.point.left", title: "Выберите правило", subtitle: tool.help)
+                    EmptyState(symbol: "hand.point.left", title: "Select a rule", subtitle: tool.help)
                 }
             }
             .frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
@@ -207,13 +207,13 @@ struct RuleListView: View {
             Image(systemName: tool.symbol).foregroundStyle(Theme.goldGradient).font(.system(size: 16))
             Text(tool.title).font(.system(size: 15, weight: .semibold))
             Spacer()
-            TextField("Поиск", text: $filter).textFieldStyle(.roundedBorder).frame(width: 120)
+            TextField("Search", text: $filter).textFieldStyle(.roundedBorder).frame(width: 120)
             Menu {
-                Button("Новое правило") { addRule() }
-                Button("Новая группа") { addGroup() }
+                Button("New Rule") { addRule() }
+                Button("New Group") { addGroup() }
                 Divider()
-                Button("Импорт…") { importRules() }
-                Button("Экспорт «\(tool.title)»…") { exportRules() }
+                Button("Import…") { importRules() }
+                Button("Export “\(tool.title)”…") { exportRules() }
             } label: {
                 Image(systemName: "plus")
             } primaryAction: { addRule() }
@@ -228,7 +228,7 @@ struct RuleListView: View {
     }
 
     private func addRule() {
-        var rule = Rule(name: "Новое правило", kind: kind, matcher: RuleMatcher(pattern: "https://api.example.com/*"))
+        var rule = Rule(name: "New Rule", kind: kind, matcher: RuleMatcher(pattern: "https://api.example.com/*"))
         if kind == .rewrite { rule.rewrite = [RewriteStep()] }
         if let sel = state.selectedRule, let g = model.rules.rules.first(where: { $0.id == sel })?.groupID { rule.groupID = g }
         withAnimation { model.rules.rules.append(rule) }
@@ -236,7 +236,7 @@ struct RuleListView: View {
     }
 
     private func addGroup() {
-        withAnimation { model.rules.groups.append(RuleGroup(name: "Группа \(model.rules.groups.count + 1)")) }
+        withAnimation { model.rules.groups.append(RuleGroup(name: "Group \(model.rules.groups.count + 1)")) }
     }
 
     private func deleteSelected() {
@@ -269,7 +269,7 @@ struct RuleListView: View {
         let enc = JSONEncoder()
         enc.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         try? enc.encode(doc).write(to: url)
-        model.showToast("Экспортировано правил: \(doc.rules.count)")
+        model.showToast("Exported \(doc.rules.count) rules")
     }
 
     private func importRules() {
@@ -278,7 +278,7 @@ struct RuleListView: View {
         guard panel.runModal() == .OK, let url = panel.url,
               let data = try? Data(contentsOf: url) else { return }
         guard let doc = try? JSONDecoder().decode(RulesDocument.self, from: data) else {
-            model.showToast("Файл не похож на правила Snifix", symbol: "exclamationmark.triangle.fill")
+            model.showToast("This file does not look like Snifix rules", symbol: "exclamationmark.triangle.fill")
             return
         }
         var groupMap: [UUID: UUID] = [:]
@@ -295,7 +295,7 @@ struct RuleListView: View {
             model.rules.rules.append(nr)
         }
         for h in doc.sslBypass where !model.rules.sslBypass.contains(h) { model.rules.sslBypass.append(h) }
-        model.showToast("Импортировано правил: \(doc.rules.count)")
+        model.showToast("Imported \(doc.rules.count) rules")
     }
 }
 
@@ -310,7 +310,7 @@ struct GroupHeader: View {
             Toggle("", isOn: Binding(get: { group.enabled }, set: { v in update { $0.enabled = v } }))
                 .toggleStyle(.switch).controlSize(.mini).labelsHidden()
             if editing {
-                TextField("Имя группы", text: $name, onCommit: { update { $0.name = name }; editing = false })
+                TextField("Group name", text: $name, onCommit: { update { $0.name = name }; editing = false })
                     .textFieldStyle(.roundedBorder)
             } else {
                 Text(group.name).font(.system(size: 11.5, weight: .semibold))
@@ -319,17 +319,17 @@ struct GroupHeader: View {
             }
             Spacer()
             Menu {
-                Button("Переименовать") { name = group.name; editing = true }
-                Button("Включить все правила") { setAll(true) }
-                Button("Выключить все правила") { setAll(false) }
+                Button("Rename") { name = group.name; editing = true }
+                Button("Enable All Rules") { setAll(true) }
+                Button("Disable All Rules") { setAll(false) }
                 Divider()
-                Button("Удалить группу (правила останутся)") {
+                Button("Delete Group (Keep Rules)") {
                     withAnimation {
                         for i in model.rules.rules.indices where model.rules.rules[i].groupID == group.id { model.rules.rules[i].groupID = nil }
                         model.rules.groups.removeAll { $0.id == group.id }
                     }
                 }
-                Button("Удалить группу и её правила", role: .destructive) {
+                Button("Delete Group and Its Rules", role: .destructive) {
                     withAnimation {
                         model.rules.rules.removeAll { $0.groupID == group.id }
                         model.rules.groups.removeAll { $0.id == group.id }
@@ -371,21 +371,21 @@ struct RuleRow: View {
         }
         .padding(.vertical, 2)
         .contextMenu {
-            Button("Дублировать") {
+            Button("Duplicate") {
                 guard let i = index else { return }
                 var copy = rule
                 copy.id = UUID()
-                copy.name += " (копия)"
+                copy.name += " (copy)"
                 model.rules.rules.insert(copy, at: i + 1)
             }
-            Menu("Переместить в группу") {
-                Button("Без группы") { if let i = index { model.rules.rules[i].groupID = nil } }
+            Menu("Move to Group") {
+                Button("No Group") { if let i = index { model.rules.rules[i].groupID = nil } }
                 ForEach(model.rules.groups) { g in
                     Button(g.name) { if let i = index { model.rules.rules[i].groupID = g.id } }
                 }
             }
             Divider()
-            Button("Удалить", role: .destructive) {
+            Button("Delete", role: .destructive) {
                 withAnimation { model.rules.rules.removeAll { $0.id == rule.id } }
             }
         }
@@ -409,9 +409,9 @@ struct HostListEditor: View {
             Text(help).font(.system(size: 12)).foregroundStyle(.secondary)
             extra
             HStack {
-                TextField("api.example.com или *.example.com", text: $newItem, onCommit: add)
+                TextField("api.example.com or *.example.com", text: $newItem, onCommit: add)
                     .textFieldStyle(.roundedBorder)
-                Button("Добавить", action: add).disabled(newItem.trimmingCharacters(in: .whitespaces).isEmpty)
+                Button("Add", action: add).disabled(newItem.trimmingCharacters(in: .whitespaces).isEmpty)
             }
             List {
                 ForEach(items, id: \.self) { host in
@@ -443,15 +443,15 @@ struct AutoBypassList: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Toggle("Автоматически пропускать хосты, где клиент не принял сертификат (пиннинг)", isOn: Binding(
+            Toggle("Automatically bypass hosts whose client rejects the certificate (pinning)", isOn: Binding(
                 get: { model.settings.autoBypassPinned }, set: { model.settings.autoBypassPinned = $0 }))
             .toggleStyle(.switch)
             if !hosts.isEmpty {
                 HStack {
-                    Text("Пропускаются сейчас: " + hosts.joined(separator: ", "))
+                    Text("Bypassed now: " + hosts.joined(separator: ", "))
                         .font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(3)
                     Spacer()
-                    Button("Сбросить") { model.engine.clearAutoBypass(); hosts = [] }
+                    Button("Reset") { model.engine.clearAutoBypass(); hosts = [] }
                 }
             }
         }
@@ -479,7 +479,7 @@ struct DNSEditor: View {
                                     set: { v in if let i = model.rules.dnsOverrides.firstIndex(where: { $0.id == item.id }) { model.rules.dnsOverrides[i] = v } })
                     HStack {
                         Toggle("", isOn: o.enabled).toggleStyle(.switch).controlSize(.mini).labelsHidden()
-                        TextField("Хост", text: o.host).textFieldStyle(.roundedBorder)
+                        TextField("Host", text: o.host).textFieldStyle(.roundedBorder)
                         Image(systemName: "arrow.right").foregroundStyle(Theme.gold)
                         TextField("IP", text: o.address).textFieldStyle(.roundedBorder).frame(width: 150)
                         Button { withAnimation { model.rules.dnsOverrides.removeAll { $0.id == item.id } } } label: {

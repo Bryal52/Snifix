@@ -60,7 +60,7 @@ enum MapLocal {
 
     private static func missing(_ path: String) -> ResponseData {
         ResponseData(statusCode: 404, headers: [HTTPHeader("Content-Type", "text/plain; charset=utf-8")],
-                     body: Data("Snifix Map Local: файл не найден\n\(path)\n".utf8))
+                     body: Data("Snifix Map Local: file not found\n\(path)\n".utf8))
     }
 }
 

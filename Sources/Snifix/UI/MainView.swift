@@ -43,9 +43,9 @@ struct MainView: View {
             }
         }
         .toolbar { MainToolbar() }
-        .searchable(text: $model.search, placement: .toolbar, prompt: "Фильтр: URL, метод, код")
+        .searchable(text: $model.search, placement: .toolbar, prompt: "Filter: URL, method, status")
         .navigationTitle("Snifix")
-        .navigationSubtitle(model.recording ? "Запись · \(model.rows.count)" : "Пауза · \(model.rows.count)")
+        .navigationSubtitle(model.recording ? "Recording · \(model.rows.count)" : "Paused · \(model.rows.count)")
         .onAppear {
             BreakpointWindowOpener.open = { openWindow(id: "breakpoints") }
             BreakpointWindowOpener.openWindow = { openWindow(id: $0) }
@@ -61,7 +61,7 @@ struct ErrorBanner: View {
             Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.red)
             Text(text).font(.system(size: 12))
             Spacer()
-            SettingsLink { Text("Настройки") }
+            SettingsLink { Text("Settings") }
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
         .background(Color.red.opacity(0.12))
@@ -84,21 +84,21 @@ struct UntrustedBanner: View {
                 .scaleEffect(glow ? 1.08 : 0.95)
                 .onAppear { withAnimation(.easeInOut(duration: 1).repeatForever()) { glow = true } }
             VStack(alignment: .leading, spacing: 4) {
-                Text("\(name) (\(address)) не доверяет сертификату Snifix — HTTPS не расшифровывается")
+                Text("\(name) (\(address)) does not trust the Snifix certificate — HTTPS is not decrypted")
                     .font(.system(size: 12.5, weight: .semibold))
                 if name == "Android" {
-                    Text("Установите сертификат как «Сертификат ЦС». Приложение должно разрешать пользовательские сертификаты (network_security_config) — попросите QA-сборку.")
+                    Text("Install the certificate as a “CA certificate”. The app must allow user certificates (network_security_config) — ask for a QA build.")
                         .font(.system(size: 11.5)).foregroundStyle(.secondary)
                 } else {
-                    Text("Надпись «Не проверено» у профиля — это нормально. Нужно ещё включить полное доверие: **Настройки → Основные → Об этом устройстве → Доверие сертификатам → Snifix CA**. Потом нажмите «Проверить снова».")
+                    Text("“Not Verified” on the profile is normal. Full trust must be turned on too: **Settings → General → About → Certificate Trust Settings → Snifix CA**. Then click Retry.")
                         .font(.system(size: 11.5)).foregroundStyle(.secondary)
                 }
             }
             Spacer()
             VStack(alignment: .trailing, spacing: 6) {
-                Button("Проверить снова") { model.retryTrust(address) }
+                Button("Retry") { model.retryTrust(address) }
                     .buttonStyle(.borderedProminent).tint(Theme.amber)
-                Button("Инструкция") { openWindow(id: "devices") }.buttonStyle(.borderless)
+                Button("How To") { openWindow(id: "devices") }.buttonStyle(.borderless)
             }
         }
         .padding(.horizontal, 14).padding(.vertical, 10)
@@ -118,42 +118,42 @@ struct MainToolbar: ToolbarContent {
             } label: {
                 HStack(spacing: 6) {
                     PulseDot(active: model.recording, color: .red)
-                    Text(model.recording ? "Запись" : "Пауза").font(.system(size: 12, weight: .medium))
+                    Text(model.recording ? "Recording" : "Paused").font(.system(size: 12, weight: .medium))
                 }
             }
-            .help(model.recording ? "Остановить запись (⌘R)" : "Начать запись (⌘R)")
+            .help(model.recording ? "Stop recording (⌘R)" : "Start recording (⌘R)")
             Button { withAnimation { model.clear() } } label: { Image(systemName: "trash") }
-                .help("Очистить (⌘K)")
+                .help("Clear (⌘K)")
         }
         ToolbarItemGroup(placement: .primaryAction) {
             MacProxyButton()
             Button { ComposeState.shared.newRequest(); openWindow(id: "compose") } label: {
-                Label("Запрос", systemImage: "paperplane")
+                Label("Compose", systemImage: "paperplane")
             }
             .labelStyle(.titleAndIcon)
-            .help("Новый запрос (⌘N). Изменить существующий — двойной клик по нему")
+            .help("New request (⌘N). To edit an existing one, double-click it")
             Menu {
                 ForEach(RulesTool.allCases) { tool in
                     Button { open(tool) } label: { Label(tool.title, systemImage: tool.symbol) }
                 }
             } label: {
-                Label("Правила", systemImage: "slider.horizontal.3")
+                Label("Rules", systemImage: "slider.horizontal.3")
             } primaryAction: { open(.mapLocal) }
             .labelStyle(.titleAndIcon)
-            .help("Map Local, Map Remote, Rewrite, точки останова, скрипты…")
-            Button { open(.script) } label: { Label("Скрипты", systemImage: "curlybraces.square") }
+            .help("Map Local, Map Remote, Rewrite, Breakpoints, Scripting…")
+            Button { open(.script) } label: { Label("Scripting", systemImage: "curlybraces.square") }
                 .labelStyle(.titleAndIcon)
-            .help("JavaScript для запросов и ответов (⌥⌘I)")
+            .help("JavaScript for requests and responses (⌥⌘I)")
             Button { openWindow(id: "breakpoints") } label: {
-                Label(model.breakpoints.isEmpty ? "Остановки" : "Остановки \(model.breakpoints.count)",
+                Label(model.breakpoints.isEmpty ? "Breakpoints" : "Breakpoints \(model.breakpoints.count)",
                       systemImage: model.breakpoints.isEmpty ? "pause.circle" : "pause.circle.fill")
                     .symbolEffect(.pulse, isActive: !model.breakpoints.isEmpty)
             }
             .labelStyle(.titleAndIcon)
-            .help("Запросы, остановленные точками останова")
-            Button { openWindow(id: "devices") } label: { Label("Устройства", systemImage: "iphone.gen3.radiowaves.left.and.right") }
+            .help("Requests paused by breakpoints")
+            Button { openWindow(id: "devices") } label: { Label("Devices", systemImage: "iphone.gen3.radiowaves.left.and.right") }
                 .labelStyle(.titleAndIcon)
-            .help("Сертификат и подключение iPhone / Android")
+            .help("Certificate and iPhone / Android setup")
         }
     }
 
@@ -182,7 +182,7 @@ struct MacProxyButton: View {
                     }
                 }
                 .frame(width: 18, height: 16)
-                Text(on ? "Mac: вкл" : "Mac: выкл").font(.system(size: 12, weight: on ? .semibold : .regular))
+                Text(on ? "Mac: On" : "Mac: Off").font(.system(size: 12, weight: on ? .semibold : .regular))
             }
             .foregroundStyle(on ? Color.black.opacity(0.85) : Color.secondary)
             .padding(.horizontal, 10)
@@ -198,7 +198,7 @@ struct MacProxyButton: View {
         .onHover { hover = $0 }
         .animation(.spring(response: 0.35, dampingFraction: 0.75), value: on)
         .animation(.easeOut(duration: 0.15), value: hover)
-        .help(on ? "Трафик Mac идёт через Snifix — нажмите, чтобы выключить (⇧⌘P)" : "Трафик Mac идёт напрямую — нажмите, чтобы включить (⇧⌘P)")
+        .help(on ? "Mac traffic goes through Snifix — click to turn off (⇧⌘P)" : "Mac traffic goes direct — click to capture it (⇧⌘P)")
     }
 }
 
@@ -213,14 +213,55 @@ struct FilterBar: View {
                     .padding(.vertical, 1)
             }
             Spacer(minLength: 6)
-            Picker("", selection: $model.statusFilter) {
-                ForEach(StatusFilter.allCases) { Text($0.rawValue).tag($0) }
-            }
-            .labelsHidden()
-            .fixedSize()
+            StatusFilterMenu(selection: $model.statusFilter)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 7)
+    }
+}
+
+/// Status code filter styled like the category capsules: dark capsule, gold when a filter is active.
+struct StatusFilterMenu: View {
+    @Binding var selection: StatusFilter
+    @UIState private var hover = false
+
+    var body: some View {
+        let active = selection != .all
+        Menu {
+            ForEach(StatusFilter.allCases) { f in
+                Button {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { selection = f }
+                } label: {
+                    if f == selection { Label(f.rawValue, systemImage: "checkmark") } else { Text(f.rawValue) }
+                }
+            }
+        } label: {
+            HStack(spacing: 5) {
+                Circle().fill(active ? Theme.statusColor(Self.sample(selection)) : Color.secondary.opacity(0.6)).frame(width: 6, height: 6)
+                Text(selection.rawValue).font(.system(size: 11.5, weight: active ? .semibold : .regular))
+                Image(systemName: "chevron.down").font(.system(size: 8, weight: .bold))
+            }
+            .foregroundStyle(active ? Color.black.opacity(0.85) : Color.secondary)
+            .padding(.horizontal, 10).padding(.vertical, 4)
+            .background(Capsule().fill(active ? AnyShapeStyle(Theme.goldGradient) : AnyShapeStyle(Color.primary.opacity(hover ? 0.09 : 0.05))))
+            .contentShape(Capsule())
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .onHover { hover = $0 }
+        .animation(.easeOut(duration: 0.15), value: hover)
+    }
+
+    private static func sample(_ f: StatusFilter) -> Int {
+        switch f {
+        case .all: return 0
+        case .ok: return 200
+        case .redirect: return 300
+        case .client: return 400
+        case .server: return 500
+        }
     }
 }
 
@@ -234,7 +275,7 @@ struct StatusBar: View {
                 Text("\(model.localAddress):\(String(model.settings.port))").monospacedDigit()
                     .textSelection(.enabled)
             }
-            Label(model.systemProxyEnabled ? "Mac: перехват" : "Mac: выкл", systemImage: "macbook")
+            Label(model.systemProxyEnabled ? "Mac: capturing" : "Mac: Off", systemImage: "macbook")
                 .foregroundStyle(model.systemProxyEnabled ? Theme.gold : .secondary)
             if !model.iPhonesOnUSB.isEmpty {
                 Label(model.iPhonesOnUSB[0], systemImage: "iphone").foregroundStyle(Theme.gold)
@@ -245,11 +286,11 @@ struct StatusBar: View {
                     .transition(.scale.combined(with: .opacity))
             }
             if !model.caTrustedOnMac {
-                Label("Сертификат не установлен на Mac", systemImage: "exclamationmark.shield").foregroundStyle(Theme.amber)
+                Label("Certificate not installed on this Mac", systemImage: "exclamationmark.shield").foregroundStyle(Theme.amber)
             }
             Spacer()
             Sparkline(values: model.flowsPerSecond).frame(width: 90, height: 14)
-            Text("\(model.visibleRows.count) из \(model.rows.count)").monospacedDigit()
+            Text("\(model.visibleRows.count) of \(model.rows.count)").monospacedDigit()
                 .contentTransition(.numericText())
         }
         .font(.system(size: 11))
@@ -329,13 +370,13 @@ struct SidebarView: View {
         @Bindable var model = model
         List(selection: $model.sidebar) {
             Section {
-                row("Все запросы", "tray.full", model.rows.count).tag(SidebarItem.all)
+                row("All Requests", "tray.full", model.rows.count).tag(SidebarItem.all)
                 if !model.pinnedHosts.isEmpty || !model.pinnedApps.isEmpty {
-                    row("Закреплённые", "pin.fill", nil).tag(SidebarItem.pinned)
+                    row("Pinned", "pin.fill", nil).tag(SidebarItem.pinned)
                 }
             }
             if !model.pinnedHosts.isEmpty || !model.pinnedApps.isEmpty {
-                Section("Закреплённые") {
+                Section("Pinned") {
                     ForEach(model.pinnedApps, id: \.self) { a in
                         HStack {
                             Label { Text(a).lineLimit(1) } icon: {
@@ -345,29 +386,29 @@ struct SidebarView: View {
                             Spacer()
                         }
                         .tag(SidebarItem.app(a))
-                            .contextMenu { Button("Открепить") { withAnimation { model.pinnedApps.removeAll { $0 == a } } } }
+                            .contextMenu { Button("Unpin") { withAnimation { model.pinnedApps.removeAll { $0 == a } } } }
                     }
                     ForEach(model.pinnedHosts, id: \.self) { h in
                         row(h, "globe", nil).tag(SidebarItem.host(h))
-                            .contextMenu { Button("Открепить") { withAnimation { model.pinnedHosts.removeAll { $0 == h } } } }
+                            .contextMenu { Button("Unpin") { withAnimation { model.pinnedHosts.removeAll { $0 == h } } } }
                     }
                 }
             }
             Section {
                 if model.deviceTree.isEmpty {
-                    Text("Пока нет запросов").font(.system(size: 11.5)).foregroundStyle(.tertiary)
+                    Text("No requests yet").font(.system(size: 11.5)).foregroundStyle(.tertiary)
                 }
                 ForEach(model.deviceTree) { device in
                     DisclosureGroup(isExpanded: expanded(device.key)) {
                         DisclosureGroup(isExpanded: expanded(device.key + "/apps")) {
                             ForEach(device.apps) { app in appRow(device, app) }
                         } label: {
-                            groupLabel("Приложения", "square.grid.2x2", device.apps.count)
+                            groupLabel("Apps", "square.grid.2x2", device.apps.count)
                         }
                         DisclosureGroup(isExpanded: expanded(device.key + "/hosts")) {
                             ForEach(device.hosts) { h in hostRow(h, tag: .deviceHost(device.key, h.name)) }
                         } label: {
-                            groupLabel("Домены", "globe", device.hosts.count)
+                            groupLabel("Domains", "globe", device.hosts.count)
                         }
                     } label: {
                         deviceRow(device).tag(SidebarItem.device(device.key))
@@ -375,39 +416,39 @@ struct SidebarView: View {
                 }
             } header: {
                 HStack {
-                    Text("Устройства")
+                    Text("Devices")
                     Spacer()
                     Menu {
-                        Picker("Сортировка", selection: $model.sidebarSort) {
+                        Picker("Sort", selection: $model.sidebarSort) {
                             ForEach(SidebarSort.allCases) { Text($0.rawValue).tag($0) }
                         }
                         .pickerStyle(.inline)
                         Divider()
-                        Button("Развернуть всё") { expandAll(true) }
-                        Button("Свернуть всё") { expandAll(false) }
+                        Button("Expand All") { expandAll(true) }
+                        Button("Collapse All") { expandAll(false) }
                     } label: {
                         Image(systemName: "line.3.horizontal.decrease.circle")
                     }
                     .menuStyle(.borderlessButton)
                     .menuIndicator(.hidden)
                     .fixedSize()
-                    .help("Сортировка: \(model.sidebarSort.rawValue)")
+                    .help("Sort: \(model.sidebarSort.rawValue)")
                 }
             }
         }
         .listStyle(.sidebar)
-        .alert("Название устройства", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
-            TextField("Например, iPhone тестовый", text: $renameText)
-            Button("Сохранить") {
+        .alert("Device Name", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
+            TextField("e.g. Test iPhone", text: $renameText)
+            Button("Save") {
                 if let d = renaming {
                     let name = renameText.trimmingCharacters(in: .whitespaces)
                     model.updateDevice(d.key) { $0.name = name.isEmpty ? nil : name }
                 }
                 renaming = nil
             }
-            Button("Отмена", role: .cancel) { renaming = nil }
+            Button("Cancel", role: .cancel) { renaming = nil }
         } message: {
-            if let d = renaming { Text(d.detail.isEmpty ? "Этот Mac" : "Адрес \(d.detail)") }
+            if let d = renaming { Text(d.detail.isEmpty ? "This Mac" : "Address \(d.detail)") }
         }
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: model.deviceTree.map(\.key))
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: model.sidebarSort)
@@ -436,8 +477,8 @@ struct SidebarView: View {
             countBadge(d.count)
         }
         .contextMenu {
-            Button("Переименовать…") { startRename(d) }
-            Menu("Иконка") {
+            Button("Rename…") { startRename(d) }
+            Menu("Icon") {
                 ForEach(DeviceIcon.allCases) { icon in
                     Button {
                         model.updateDevice(d.key) { $0.icon = icon }
@@ -447,13 +488,13 @@ struct SidebarView: View {
                     }
                 }
             }
-            Button(d.pinned ? "Открепить" : "Закрепить наверху") { model.updateDevice(d.key) { $0.pinned.toggle() } }
+            Button(d.pinned ? "Unpin" : "Pin to Top") { model.updateDevice(d.key) { $0.pinned.toggle() } }
             Divider()
-            Button("Показать только это устройство") { model.sidebar = .device(d.key) }
-            Button("Развернуть") { setExpanded(d.key, true); setExpanded(d.key + "/apps", true) }
+            Button("Show Only This Device") { model.sidebar = .device(d.key) }
+            Button("Expand") { setExpanded(d.key, true); setExpanded(d.key + "/apps", true) }
             if model.deviceProfiles[d.key] != nil {
                 Divider()
-                Button("Сбросить название и иконку") { model.updateDevice(d.key) { $0 = DeviceProfile() } }
+                Button("Reset Name and Icon") { model.updateDevice(d.key) { $0 = DeviceProfile() } }
             }
         }
     }
@@ -476,7 +517,7 @@ struct SidebarView: View {
             }
             .tag(SidebarItem.deviceApp(d.key, app.name))
             .contextMenu {
-                Button(model.pinnedApps.contains(app.name) ? "Открепить" : "Закрепить") {
+                Button(model.pinnedApps.contains(app.name) ? "Unpin" : "Pin") {
                     withAnimation {
                         if model.pinnedApps.contains(app.name) { model.pinnedApps.removeAll { $0 == app.name } }
                         else { model.pinnedApps.append(app.name) }
@@ -496,17 +537,17 @@ struct SidebarView: View {
         }
         .tag(tag)
         .contextMenu {
-            Button(model.pinnedHosts.contains(h.name) ? "Открепить" : "Закрепить") {
+            Button(model.pinnedHosts.contains(h.name) ? "Unpin" : "Pin") {
                 withAnimation {
                     if model.pinnedHosts.contains(h.name) { model.pinnedHosts.removeAll { $0 == h.name } }
                     else { model.pinnedHosts.append(h.name) }
                 }
             }
-            Button("Не расшифровывать HTTPS") {
+            Button("Bypass SSL") {
                 if !model.rules.sslBypass.contains(h.name) { model.rules.sslBypass.append(h.name) }
-                model.showToast("\(h.name) добавлен в исключения SSL")
+                model.showToast("\(h.name) added to SSL Bypass")
             }
-            Button("Копировать") { model.copy(h.name) }
+            Button("Copy") { model.copy(h.name) }
         }
     }
 
@@ -571,8 +612,8 @@ struct FlowTable: View {
         Group {
             if model.rows.isEmpty {
                 EmptyState(symbol: "dot.radiowaves.left.and.right",
-                           title: model.recording ? "Ждём запросы…" : "Запись на паузе",
-                           subtitle: "Трафик Mac идёт через Snifix, когда включён перехват. Чтобы подключить iPhone или Android, откройте «Устройства».")
+                           title: model.recording ? "Waiting for requests…" : "Recording paused",
+                           subtitle: "Mac traffic goes through Snifix while capturing is on. To connect an iPhone or Android, open Devices.")
             } else {
                 Table(model.visibleRows, selection: $model.selection, sortOrder: $model.sortOrder) {
                     TableColumn("#", value: \.id) { r in
@@ -591,37 +632,37 @@ struct FlowTable: View {
                         .help(r.errorText.isEmpty ? r.url : r.errorText)
                     }
                     .width(min: 200, ideal: 520)
-                    TableColumn("Клиент", value: \.appName) { r in
+                    TableColumn("Client", value: \.appName) { r in
                         HStack(spacing: 5) {
                             AppIconView(app: r.appName, path: r.appPath, remote: r.isRemote, size: 14)
                             Text(r.appName).lineLimit(1).foregroundStyle(.secondary)
                         }
                     }
                     .width(min: 60, ideal: 110)
-                    TableColumn("Метод", value: \.method) { r in
+                    TableColumn("Method", value: \.method) { r in
                         Text(r.method).font(.system(size: 11, weight: .semibold, design: .rounded))
                             .foregroundStyle(Theme.methodColor(r.method))
                     }
                     .width(min: 44, ideal: 60, max: 80)
-                    TableColumn("Протокол", value: \.protocolName) { r in
+                    TableColumn("Protocol", value: \.protocolName) { r in
                         Text(r.protocolName).font(.system(size: 10.5, weight: .medium, design: .rounded))
                             .foregroundStyle(r.protocolName.hasPrefix("h2") ? Theme.gold : .secondary)
                     }
                     .width(min: 40, ideal: 56, max: 80)
-                    TableColumn("Код", value: \.statusCode) { r in
+                    TableColumn("Status", value: \.statusCode) { r in
                         Text(r.statusText).monospacedDigit()
                             .foregroundStyle(Theme.statusColor(r.statusCode, failed: r.isFailed))
                     }
                     .width(min: 40, ideal: 58, max: 110)
-                    TableColumn("Время", value: \.startedAt) { r in
+                    TableColumn("Time", value: \.startedAt) { r in
                         Text(timeFormatter.string(from: r.startedAt)).monospacedDigit().foregroundStyle(.secondary)
                     }
                     .width(min: 70, ideal: 90, max: 110)
-                    TableColumn("Длит.", value: \.duration) { r in
+                    TableColumn("Duration", value: \.duration) { r in
                         Text(formatDuration(r.duration)).monospacedDigit().foregroundStyle(.secondary)
                     }
                     .width(min: 50, ideal: 66, max: 100)
-                    TableColumn("Ответ", value: \.responseSize) { r in
+                    TableColumn("Size", value: \.responseSize) { r in
                         Text(formatBytes(r.responseSize)).monospacedDigit().foregroundStyle(.secondary)
                     }
                     .width(min: 50, ideal: 70, max: 100)
@@ -678,42 +719,42 @@ struct FlowContextMenu: View {
     var body: some View {
         let flows = ids.compactMap { model.flows[$0] }.sorted { $0.id < $1.id }
         if let f = flows.first {
-            Button("Копировать URL") { model.copy(flows.map(\.request.url).joined(separator: "\n")) }
-            Button("Копировать как cURL") { model.copy(Export.curl(f.request), note: "cURL скопирован") }
+            Button("Copy URL") { model.copy(flows.map(\.request.url).joined(separator: "\n")) }
+            Button("Copy as cURL") { model.copy(Export.curl(f.request), note: "cURL copied") }
             if let res = f.response {
-                Button("Копировать тело ответа") {
+                Button("Copy Response Body") {
                     model.copy(String(decoding: BodyCodec.decoded(res.body, headers: res.headers), as: UTF8.self))
                 }
             }
             Divider()
-            Button("Повторить") { for x in flows { model.repeatRequest(x.request) } }
-            Button("Изменить и отправить…") {
+            Button("Repeat") { for x in flows { model.repeatRequest(x.request) } }
+            Button("Edit & Send…") {
                 ComposeState.shared.load(f)
                 openWindow(id: "compose")
             }
-            Button("Скрипт для этого запроса…") { create(.script, f) }
-            Button("Подменить ответ (Map Local)…") { create(.mapLocal, f) }
+            Button("Script for This Request…") { create(.script, f) }
+            Button("Map Local (Mock Response)…") { create(.mapLocal, f) }
             Divider()
-            Menu("Создать правило") {
-                Button("Map Local — подменить ответ") { create(.mapLocal, f) }
-                Button("Map Remote — перенаправить") { create(.mapRemote, f) }
-                Button("Rewrite — изменить") { create(.rewrite, f) }
-                Button("Точка останова") { create(.breakpoint, f) }
-                Button("Скрипт") { create(.script, f) }
-                Button("Блокировать") { create(.block, f) }
-                Button("Медленная сеть") { create(.throttle, f) }
+            Menu("Tools") {
+                Button("Map Local") { create(.mapLocal, f) }
+                Button("Map Remote") { create(.mapRemote, f) }
+                Button("Rewrite") { create(.rewrite, f) }
+                Button("Breakpoint") { create(.breakpoint, f) }
+                Button("Script") { create(.script, f) }
+                Button("Block") { create(.block, f) }
+                Button("Network Conditions") { create(.throttle, f) }
             }
-            Button(model.pinnedHosts.contains(f.request.host) ? "Открепить домен" : "Закрепить домен") {
+            Button(model.pinnedHosts.contains(f.request.host) ? "Unpin Domain" : "Pin Domain") {
                 if model.pinnedHosts.contains(f.request.host) { model.pinnedHosts.removeAll { $0 == f.request.host } }
                 else { model.pinnedHosts.append(f.request.host) }
             }
-            Button("Не расшифровывать \(f.request.host)") {
+            Button("Bypass SSL for \(f.request.host)") {
                 if !model.rules.sslBypass.contains(f.request.host) { model.rules.sslBypass.append(f.request.host) }
-                model.showToast("\(f.request.host) добавлен в исключения SSL")
+                model.showToast("\(f.request.host) added to SSL Bypass")
             }
             Divider()
-            Button("Экспорт в HAR…") { exportHAR(flows) }
-            Button("Удалить", role: .destructive) { model.remove(ids) }
+            Button("Export as HAR…") { exportHAR(flows) }
+            Button("Delete", role: .destructive) { model.remove(ids) }
         }
     }
 
@@ -731,7 +772,7 @@ struct FlowContextMenu: View {
         panel.allowedContentTypes = [UTType(filenameExtension: "har") ?? .json]
         if panel.runModal() == .OK, let url = panel.url {
             try? Export.har(flows).write(to: url)
-            model.showToast("Сохранено \(flows.count) запросов")
+            model.showToast("Saved \(flows.count) requests")
         }
     }
 }

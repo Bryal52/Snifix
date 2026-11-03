@@ -194,11 +194,11 @@ struct JSONTreeView: View {
                 .font(.system(size: 12, design: .monospaced))
                 .textSelection(.enabled)
                 .contextMenu {
-                    Button("Копировать значение") {
+                    Button("Copy Value") {
                         NSPasteboard.general.clearContents()
                         NSPasteboard.general.setString(node.value.trimmingCharacters(in: CharacterSet(charactersIn: "\"")), forType: .string)
                     }
-                    Button("Копировать ключ") {
+                    Button("Copy Key") {
                         NSPasteboard.general.clearContents()
                         NSPasteboard.general.setString(node.key, forType: .string)
                     }

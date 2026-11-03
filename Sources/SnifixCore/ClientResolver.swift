@@ -75,7 +75,7 @@ public enum ClientResolver {
             if ua.contains("Chrome/") { return "Chrome" }
             if ua.contains("Firefox/") { return "Firefox" }
             if ua.contains("Safari/") { return "Safari" }
-            return "Браузер"
+            return "Browser"
         }
         let name = product.removingPercentEncoding ?? product
         return name.isEmpty ? nil : name

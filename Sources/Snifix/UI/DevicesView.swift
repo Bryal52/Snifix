@@ -74,11 +74,11 @@ struct MacCard: View {
     @Environment(AppModel.self) private var model
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Label("Этот Mac", systemImage: "macbook").font(.system(size: 17, weight: .semibold))
+            Label("This Mac", systemImage: "macbook").font(.system(size: 17, weight: .semibold))
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("Перехват трафика Mac").font(.system(size: 13, weight: .medium))
-                    Text("Snifix прописывается системным прокси, при выходе всё возвращается как было.")
+                    Text("Capture Mac Traffic").font(.system(size: 13, weight: .medium))
+                    Text("Snifix sets itself as the system proxy and restores your settings when it quits.")
                         .font(.system(size: 11.5)).foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -92,23 +92,23 @@ struct MacCard: View {
                     .foregroundStyle(model.caTrustedOnMac ? AnyShapeStyle(Theme.goldGradient) : AnyShapeStyle(Color.orange))
                     .symbolEffect(.bounce, value: model.caTrustedOnMac)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(model.caTrustedOnMac ? "Сертификат установлен и доверен" : "Сертификат не установлен")
+                    Text(model.caTrustedOnMac ? "Certificate installed and trusted" : "Certificate not installed")
                         .font(.system(size: 13, weight: .medium))
-                    Text("«\(model.ca.commonName)» нужен, чтобы браузеры и программы на Mac принимали расшифрованный HTTPS.")
+                    Text("“\(model.ca.commonName)” lets browsers and apps on the Mac accept decrypted HTTPS.")
                         .font(.system(size: 11.5)).foregroundStyle(.secondary)
                 }
                 Spacer()
                 if !model.caTrustedOnMac {
-                    Button("Установить…") { model.trustCertificateOnMac() }
+                    Button("Install…") { model.trustCertificateOnMac() }
                         .buttonStyle(.borderedProminent).tint(Theme.amber)
                 } else {
-                    Button("Показать в Finder") {
+                    Button("Show in Finder") {
                         NSWorkspace.shared.selectFile(model.supportDirectory.appendingPathComponent("snifix-ca.pem").path,
                                                       inFileViewerRootedAtPath: "")
                     }
                 }
             }
-            Text("macOS попросит пароль — это стандартное окно системы для доверия сертификату. Firefox использует своё хранилище: импортируйте файл snifix-ca.pem в его настройках.")
+            Text("macOS asks for your password — the standard system prompt for trusting a certificate. Firefox has its own store: import snifix-ca.pem in its settings.")
                 .font(.system(size: 11)).foregroundStyle(.secondary)
         }
         .card()
@@ -124,7 +124,7 @@ struct IPhoneCard: View {
                 Label("iPhone / iPad", systemImage: "iphone").font(.system(size: 17, weight: .semibold))
                 Spacer()
                 if let name = model.iPhonesOnUSB.first {
-                    Label("\(name) по USB", systemImage: "cable.connector")
+                    Label("\(name) on USB", systemImage: "cable.connector")
                         .font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.gold)
                         .transition(.scale.combined(with: .opacity))
                 }
@@ -135,26 +135,26 @@ struct IPhoneCard: View {
                     .padding(8)
                     .background(RoundedRectangle(cornerRadius: 14).fill(.white))
                 VStack(alignment: .leading, spacing: 10) {
-                    StepRow(number: 1, text: "iPhone и Mac в одной Wi-Fi сети.")
-                    StepRow(number: 2, text: "Wi-Fi → (i) → **Прокси → Авто**, адрес:")
+                    StepRow(number: 1, text: "iPhone and Mac are on the same Wi-Fi network.")
+                    StepRow(number: 2, text: "Wi-Fi → (i) → **Configure Proxy → Automatic**, URL:")
                     CopyField(text: model.pacURL)
-                    Text("Работает и при смене IP Mac. Если не подключается — адрес по IP: \(model.pacURLByIP)")
+                    Text("Keeps working when the Mac's IP changes. If it does not connect, use the IP address: \(model.pacURLByIP)")
                         .font(.system(size: 10.5)).foregroundStyle(.secondary).textSelection(.enabled)
-                    StepRow(number: 3, text: "Наведите камеру на QR-код и скачайте сертификат (или откройте **http://snifix.cert** в Safari).")
-                    StepRow(number: 4, text: "Настройки → Основные → **VPN и управление устройством** → Snifix CA → Установить.")
-                    StepRow(number: 5, text: "Основные → Об этом устройстве → **Доверие сертификатам** → включить Snifix CA. Без этого шага HTTPS не расшифруется. Надпись «Не проверено» у профиля — это нормально.")
+                    StepRow(number: 3, text: "Scan the QR code and download the certificate (or open **http://snifix.cert** in Safari).")
+                    StepRow(number: 4, text: "Settings → General → **VPN & Device Management** → Snifix CA → Install.")
+                    StepRow(number: 5, text: "General → About → **Certificate Trust Settings** → turn on Snifix CA. Without this step HTTPS is not decrypted. “Not Verified” on the profile is normal.")
                 }
             }
             Divider()
             VStack(alignment: .leading, spacing: 8) {
-                Text("Когда перехватывать").font(.system(size: 13, weight: .medium))
+                Text("When to Capture").font(.system(size: 13, weight: .medium))
                 Picker("", selection: Binding(get: { model.settings.iPhoneMode }, set: { model.settings.iPhoneMode = $0 })) {
-                    Text("Только когда iPhone подключён по USB").tag(ProxySettings.IPhoneMode.usbOnly)
-                    Text("Всегда, пока Snifix запущен").tag(ProxySettings.IPhoneMode.always)
-                    Text("Никогда").tag(ProxySettings.IPhoneMode.off)
+                    Text("Only while the iPhone is connected by USB").tag(ProxySettings.IPhoneMode.usbOnly)
+                    Text("Always while Snifix is running").tag(ProxySettings.IPhoneMode.always)
+                    Text("Never").tag(ProxySettings.IPhoneMode.off)
                 }
                 .pickerStyle(.radioGroup).labelsHidden()
-                Text("Настройка «Авто» делается один раз. Если Snifix закрыт, Mac выключен или кабель отключён (в режиме USB), iPhone ходит в интернет напрямую. iOS кэширует настройку — переключение может занять до минуты.")
+                Text("Set “Automatic” once. When Snifix is closed, the Mac is off or the cable is unplugged (USB mode), the iPhone goes online directly. iOS caches the setting, so switching can take up to a minute.")
                     .font(.system(size: 11)).foregroundStyle(.secondary)
             }
         }
@@ -171,17 +171,17 @@ struct AndroidCard: View {
             HStack {
                 Label("Android", systemImage: "candybarphone").font(.system(size: 17, weight: .semibold))
                 Spacer()
-                Toggle("Подключать автоматически по USB", isOn: Binding(
+                Toggle("Connect automatically over USB", isOn: Binding(
                     get: { model.settings.androidAutoConnect }, set: { model.settings.androidAutoConnect = $0 }))
                     .toggleStyle(.switch).font(.system(size: 12))
             }
             if model.android.adb == nil {
-                Label("adb не найден. Установите: brew install android-platform-tools", systemImage: "exclamationmark.triangle.fill")
+                Label("adb not found. Install it: brew install android-platform-tools", systemImage: "exclamationmark.triangle.fill")
                     .foregroundStyle(Theme.amber).font(.system(size: 12))
             } else if model.androidDevices.isEmpty {
                 HStack(spacing: 12) {
                     ProgressView().controlSize(.small)
-                    Text("Подключите телефон по USB с включённой отладкой по USB (Параметры разработчика).")
+                    Text("Connect the phone by USB with USB debugging on (Developer options).")
                         .font(.system(size: 12)).foregroundStyle(.secondary)
                 }
                 .padding(.vertical, 6)
@@ -194,19 +194,19 @@ struct AndroidCard: View {
                         .symbolEffect(.bounce, value: d.proxied)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(d.model).font(.system(size: 13, weight: .medium))
-                        Text(d.state != "device" ? (d.state == "unauthorized" ? "Разрешите отладку на телефоне" : d.state)
-                             : d.proxied ? "Трафик идёт в Snifix по USB-кабелю" : "Подключён, прокси выключен")
+                        Text(d.state != "device" ? (d.state == "unauthorized" ? "Allow debugging on the phone" : d.state)
+                             : d.proxied ? "Traffic goes to Snifix over the USB cable" : "Connected, proxy off")
                             .font(.system(size: 11.5)).foregroundStyle(d.proxied ? Theme.gold : .secondary)
                     }
                     Spacer()
                     if d.state == "device" {
-                        Button("Сертификат на телефон") {
+                        Button("Send Certificate") {
                             let ok = model.android.pushCertificate(d.serial, der: model.ca.certificateDER)
-                            model.showToast(ok ? "Файл Snifix-CA.crt в «Загрузках» телефона" : "Не удалось скопировать сертификат",
+                            model.showToast(ok ? "Snifix-CA.crt is in the phone's Downloads" : "Could not copy the certificate",
                                             symbol: ok ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
                         }
-                        if d.proxied { Button("Отключить") { model.disconnectAndroid(d) } }
-                        else { Button("Подключить") { model.connectAndroid(d) }.buttonStyle(.borderedProminent).tint(Theme.amber) }
+                        if d.proxied { Button("Disconnect") { model.disconnectAndroid(d) } }
+                        else { Button("Connect") { model.connectAndroid(d) }.buttonStyle(.borderedProminent).tint(Theme.amber) }
                     }
                 }
                 .padding(10)
@@ -215,11 +215,11 @@ struct AndroidCard: View {
             }
             Divider()
             VStack(alignment: .leading, spacing: 8) {
-                StepRow(number: 1, text: "Включите **Отладку по USB** и подключите кабель — Snifix сам направит трафик телефона через кабель (Wi-Fi сеть не важна).")
-                StepRow(number: 2, text: "Нажмите «Сертификат на телефон», затем на телефоне: Безопасность → Шифрование и учётные данные → **Установить сертификат → Сертификат ЦС** → Snifix-CA.crt.")
-                StepRow(number: 3, text: "Android 7+ доверяет пользовательскому сертификату только если приложение это разрешает (`network_security_config`). Для QA-сборки попросите разработчиков добавить `<certificates src=\"user\"/>`.")
+                StepRow(number: 1, text: "Turn on **USB debugging** and plug in the cable — Snifix routes the phone's traffic through the cable (the Wi-Fi network does not matter).")
+                StepRow(number: 2, text: "Click Send Certificate, then on the phone: Security → Encryption & credentials → **Install a certificate → CA certificate** → Snifix-CA.crt.")
+                StepRow(number: 3, text: "Android 7+ trusts user certificates only if the app allows it (`network_security_config`). Ask the developers to add `<certificates src=\"user\"/>` to the QA build.")
             }
-            Label("Перед тем как вынуть кабель, нажмите «Отключить» — иначе на телефоне останется прокси 127.0.0.1 и интернет не будет работать, пока вы снова не подключите его к Mac (Snifix уберёт прокси сам при выходе).",
+            Label("Click Disconnect before unplugging the cable — otherwise the phone keeps the 127.0.0.1 proxy and has no internet until you plug it into the Mac again (Snifix removes the proxy itself when it quits).",
                   systemImage: "info.circle")
                 .font(.system(size: 11)).foregroundStyle(.secondary)
         }
@@ -256,10 +256,10 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
-            Section("Прокси") {
+            Section("Proxy") {
                 HStack {
-                    TextField("Порт", text: $port).frame(width: 90)
-                    Button("Применить") {
+                    TextField("Port", text: $port).frame(width: 90)
+                    Button("Apply") {
                         if let p = Int(port), (1024...65535).contains(p) {
                             model.settings.port = p
                             model.restartProxy()
@@ -267,24 +267,24 @@ struct SettingsView: View {
                     }
                     .disabled(Int(port) == model.settings.port)
                 }
-                Toggle("Включать перехват трафика Mac при запуске", isOn: bind(\.enableSystemProxyOnLaunch))
+                Toggle("Capture Mac traffic at launch", isOn: bind(\.enableSystemProxyOnLaunch))
             }
             Section("HTTPS") {
-                Toggle("Расшифровывать HTTPS", isOn: bind(\.decryptHTTPS))
-                Toggle("Проверять сертификаты серверов", isOn: bind(\.verifyUpstreamCertificates))
-                Text("Выключите для тестовых серверов с самоподписанным сертификатом.").font(.caption).foregroundStyle(.secondary)
-                Toggle("Пропускать хосты с пиннингом сертификата", isOn: bind(\.autoBypassPinned))
-                Toggle("HTTP/2 (с приложениями и серверами)", isOn: bind(\.http2))
-                Text("Выключите, если приложение или сервер плохо работает через HTTP/2 — тогда всё пойдёт по HTTP/1.1.").font(.caption).foregroundStyle(.secondary)
+                Toggle("Decrypt HTTPS", isOn: bind(\.decryptHTTPS))
+                Toggle("Verify server certificates", isOn: bind(\.verifyUpstreamCertificates))
+                Text("Turn off for test servers with self-signed certificates.").font(.caption).foregroundStyle(.secondary)
+                Toggle("Bypass hosts that pin certificates", isOn: bind(\.autoBypassPinned))
+                Toggle("HTTP/2 (with apps and servers)", isOn: bind(\.http2))
+                Text("Turn off if an app or server misbehaves over HTTP/2 — everything then uses HTTP/1.1.").font(.caption).foregroundStyle(.secondary)
             }
-            Section("Список") {
-                Picker("Хранить запросов", selection: bind(\.maxFlows)) {
+            Section("List") {
+                Picker("Keep requests", selection: bind(\.maxFlows)) {
                     ForEach([2000, 5000, 20000, 50000, 100000], id: \.self) { Text("\($0)").tag($0) }
                 }
             }
-            Section("Файлы") {
-                Button("Открыть папку Snifix") { NSWorkspace.shared.open(model.supportDirectory) }
-                Text("Правила, настройки и сертификат лежат в \(model.supportDirectory.path)").font(.caption).foregroundStyle(.secondary)
+            Section("Files") {
+                Button("Open Snifix Folder") { NSWorkspace.shared.open(model.supportDirectory) }
+                Text("Rules, settings and the certificate are stored in \(model.supportDirectory.path)").font(.caption).foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)

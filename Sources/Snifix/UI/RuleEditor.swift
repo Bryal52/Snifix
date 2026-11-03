@@ -50,25 +50,25 @@ struct CommonFields: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                TextField("Название", text: $rule.name)
+                TextField("Name", text: $rule.name)
                     .textFieldStyle(.plain)
                     .font(.system(size: 17, weight: .semibold))
-                Toggle("Включено", isOn: $rule.enabled).toggleStyle(.switch)
+                Toggle("Enabled", isOn: $rule.enabled).toggleStyle(.switch)
             }
             FieldLabel(text: "URL")
             TextField("https://api.example.com/v1/*", text: $rule.matcher.pattern)
                 .textFieldStyle(.roundedBorder)
                 .font(.system(size: 12.5, design: .monospaced))
             HStack(spacing: 14) {
-                Toggle("Регулярное выражение", isOn: $rule.matcher.useRegex)
-                Toggle("Включая вложенные пути", isOn: $rule.matcher.includeSubpaths).disabled(rule.matcher.useRegex)
+                Toggle("Regex", isOn: $rule.matcher.useRegex)
+                Toggle("Include all subpaths", isOn: $rule.matcher.includeSubpaths).disabled(rule.matcher.useRegex)
             }
             .font(.system(size: 12))
             HStack(spacing: 6) {
-                Text("Методы").font(.system(size: 12)).foregroundStyle(.secondary)
+                Text("Methods").font(.system(size: 12)).foregroundStyle(.secondary)
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 4) {
-                        chip("Любой", on: rule.matcher.methods.isEmpty) { rule.matcher.methods = [] }
+                        chip("Any", on: rule.matcher.methods.isEmpty) { rule.matcher.methods = [] }
                         ForEach(methods, id: \.self) { m in
                             chip(m, on: rule.matcher.methods.contains(m)) {
                                 if let i = rule.matcher.methods.firstIndex(of: m) { rule.matcher.methods.remove(at: i) }
@@ -78,8 +78,8 @@ struct CommonFields: View {
                     }
                 }
             }
-            Picker("Группа", selection: $rule.groupID) {
-                Text("Без группы").tag(UUID?.none)
+            Picker("Group", selection: $rule.groupID) {
+                Text("No Group").tag(UUID?.none)
                 ForEach(model.rules.groups) { g in Text(g.name).tag(UUID?.some(g.id)) }
             }
             .fixedSize()
@@ -110,7 +110,7 @@ struct MatchPreview: View {
         HStack(spacing: 6) {
             Image(systemName: matched.isEmpty ? "circle.dashed" : "checkmark.circle.fill")
                 .foregroundStyle(matched.isEmpty ? AnyShapeStyle(.secondary) : AnyShapeStyle(Theme.goldGradient))
-            Text(matched.isEmpty ? "Среди записанных запросов совпадений нет" : "Совпадений среди записанных запросов: \(matched.count)")
+            Text(matched.isEmpty ? "No recorded requests match" : "Matches \(matched.count) recorded requests")
                 .font(.system(size: 11)).foregroundStyle(.secondary)
             if let first = matched.last {
                 Text(first.request.url).font(.system(size: 10.5, design: .monospaced)).foregroundStyle(.tertiary)
@@ -128,9 +128,9 @@ struct HeadersEditor: View {
         VStack(alignment: .leading, spacing: 4) {
             ForEach(headers.indices, id: \.self) { i in
                 HStack(spacing: 6) {
-                    TextField("Заголовок", text: Binding(get: { headers[safe: i]?.name ?? "" }, set: { if headers.indices.contains(i) { headers[i].name = $0 } }))
+                    TextField("Header", text: Binding(get: { headers[safe: i]?.name ?? "" }, set: { if headers.indices.contains(i) { headers[i].name = $0 } }))
                         .textFieldStyle(.roundedBorder).frame(width: 190)
-                    TextField("Значение", text: Binding(get: { headers[safe: i]?.value ?? "" }, set: { if headers.indices.contains(i) { headers[i].value = $0 } }))
+                    TextField("Value", text: Binding(get: { headers[safe: i]?.value ?? "" }, set: { if headers.indices.contains(i) { headers[i].value = $0 } }))
                         .textFieldStyle(.roundedBorder)
                     Button { withAnimation { _ = headers.remove(at: i) } } label: { Image(systemName: "minus.circle") }
                         .buttonStyle(.borderless)
@@ -138,7 +138,7 @@ struct HeadersEditor: View {
                 .font(.system(size: 12, design: .monospaced))
             }
             Button { withAnimation { headers.append(HTTPHeader("", "")) } } label: {
-                Label("Добавить заголовок", systemImage: "plus.circle")
+                Label("Add Header", systemImage: "plus.circle")
             }
             .buttonStyle(.borderless).font(.system(size: 12))
         }
@@ -156,64 +156,64 @@ struct MapLocalFields: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                FieldLabel(text: "Ответ")
+                FieldLabel(text: "Size")
                 Spacer()
                 Picker("", selection: $rule.mapLocal.source) {
-                    Text("Текст").tag(MapLocalSource.inline)
-                    Text("Файл").tag(MapLocalSource.file)
-                    Text("Папка").tag(MapLocalSource.directory)
+                    Text("Text").tag(MapLocalSource.inline)
+                    Text("File").tag(MapLocalSource.file)
+                    Text("Folder").tag(MapLocalSource.directory)
                 }
                 .pickerStyle(.segmented).labelsHidden().fixedSize()
             }
             HStack {
-                Text("Код").font(.system(size: 12)).foregroundStyle(.secondary)
+                Text("Status").font(.system(size: 12)).foregroundStyle(.secondary)
                 TextField("200", value: $rule.mapLocal.statusCode, format: .number.grouping(.never))
                     .textFieldStyle(.roundedBorder).frame(width: 70)
-                Menu("Шаблон") {
+                Menu("Preset") {
                     ForEach([200, 201, 204, 301, 400, 401, 403, 404, 409, 422, 429, 500, 502, 503], id: \.self) { code in
                         Button("\(code) \(ResponseData.standardReason(code))") { rule.mapLocal.statusCode = code }
                     }
                 }
                 .fixedSize()
             }
-            FieldLabel(text: "Заголовки")
+            FieldLabel(text: "Headers")
             HeadersEditor(headers: $rule.mapLocal.headers)
             switch rule.mapLocal.source {
             case .inline:
                 HStack {
-                    FieldLabel(text: "Тело")
+                    FieldLabel(text: "Body")
                     Spacer()
-                    Button("Форматировать JSON") { rule.mapLocal.body = JSONPretty.format(rule.mapLocal.body) }
+                    Button("Format JSON") { rule.mapLocal.body = JSONPretty.format(rule.mapLocal.body) }
                         .buttonStyle(.borderless).font(.system(size: 11))
-                    Button("Сохранить в файл…") { saveToFile() }.buttonStyle(.borderless).font(.system(size: 11))
+                    Button("Save to File…") { saveToFile() }.buttonStyle(.borderless).font(.system(size: 11))
                 }
                 CodeView(text: rule.mapLocal.body, json: true, editable: true) { rule.mapLocal.body = $0 }
                     .frame(minHeight: 260)
                     .background(RoundedRectangle(cornerRadius: 8).fill(Theme.background))
                     .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Theme.stroke))
                 if !rule.mapLocal.body.isEmpty && rule.mapLocal.headers["Content-Type"]?.contains("json") == true && !JSONPretty.isJSON(rule.mapLocal.body) {
-                    Label("Тело не является корректным JSON", systemImage: "exclamationmark.triangle.fill")
+                    Label("The body is not valid JSON", systemImage: "exclamationmark.triangle.fill")
                         .font(.system(size: 11)).foregroundStyle(Theme.amber)
                 }
             case .file, .directory:
                 let isDir = rule.mapLocal.source == .directory
                 HStack {
-                    TextField(isDir ? "Папка" : "Файл", text: $rule.mapLocal.path)
+                    TextField(isDir ? "Folder" : "File", text: $rule.mapLocal.path)
                         .textFieldStyle(.roundedBorder).font(.system(size: 12, design: .monospaced))
-                    Button("Выбрать…") { choose(directory: isDir) }
+                    Button("Choose…") { choose(directory: isDir) }
                     Button { NSWorkspace.shared.selectFile(expanded, inFileViewerRootedAtPath: "") } label: { Image(systemName: "folder") }
                         .disabled(rule.mapLocal.path.isEmpty)
                     if !isDir {
                         Button { NSWorkspace.shared.open(URL(fileURLWithPath: expanded)) } label: { Image(systemName: "square.and.pencil") }
-                            .help("Открыть в редакторе").disabled(rule.mapLocal.path.isEmpty)
+                            .help("Open in Editor").disabled(rule.mapLocal.path.isEmpty)
                     }
                 }
                 Text(isDir
-                     ? "Остаток пути после части URL до «*» ищется в папке. Пример: правило https://api.x.com/v1/* и папка ~/mocks — запрос /v1/users/42 вернёт ~/mocks/users/42 (или 42.json). Для папки отдаётся index.json."
-                     : "Файл читается при каждом запросе — его можно править в любом редакторе.")
+                     ? "The rest of the path after the part before “*” is looked up in the folder. Example: rule https://api.x.com/v1/* and folder ~/mocks — /v1/users/42 returns ~/mocks/users/42 (or 42.json). A folder returns its index.json."
+                     : "The file is read on every request — edit it in any editor.")
                     .font(.system(size: 11)).foregroundStyle(.secondary)
                 if !rule.mapLocal.path.isEmpty && !FileManager.default.fileExists(atPath: expanded) {
-                    Label("Путь не найден", systemImage: "exclamationmark.triangle.fill").font(.system(size: 11)).foregroundStyle(.red)
+                    Label("Path not found", systemImage: "exclamationmark.triangle.fill").font(.system(size: 11)).foregroundStyle(.red)
                 }
             }
         }
@@ -253,32 +253,32 @@ struct MapRemoteFields: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            FieldLabel(text: "Куда отправлять (пустое поле — без изменений)")
+            FieldLabel(text: "Map to (empty field = unchanged)")
             Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 8) {
                 GridRow {
-                    Text("Схема").foregroundStyle(.secondary)
+                    Text("Scheme").foregroundStyle(.secondary)
                     Picker("", selection: $action.scheme) {
-                        Text("Как есть").tag("")
+                        Text("Unchanged").tag("")
                         Text("https").tag("https")
                         Text("http").tag("http")
                     }
                     .labelsHidden().fixedSize()
                 }
                 GridRow {
-                    Text("Хост").foregroundStyle(.secondary)
+                    Text("Host").foregroundStyle(.secondary)
                     TextField("staging.example.com", text: $action.host).textFieldStyle(.roundedBorder)
                 }
                 GridRow {
-                    Text("Порт").foregroundStyle(.secondary)
-                    TextField("по умолчанию", value: $action.port, format: .number.grouping(.never)).textFieldStyle(.roundedBorder).frame(width: 120)
+                    Text("Port").foregroundStyle(.secondary)
+                    TextField("default", value: $action.port, format: .number.grouping(.never)).textFieldStyle(.roundedBorder).frame(width: 120)
                 }
                 GridRow {
-                    Text("Путь").foregroundStyle(.secondary)
+                    Text("Path").foregroundStyle(.secondary)
                     TextField("/v2/users", text: $action.path).textFieldStyle(.roundedBorder)
                 }
             }
             .font(.system(size: 12))
-            Toggle("Сохранить исходный заголовок Host", isOn: $action.preserveHostHeader).font(.system(size: 12))
+            Toggle("Preserve the original Host header", isOn: $action.preserveHostHeader).font(.system(size: 12))
         }
         .card()
     }
@@ -290,9 +290,9 @@ struct RewriteFields: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                FieldLabel(text: "Изменения")
+                FieldLabel(text: "Changes")
                 Spacer()
-                Button { withAnimation { steps.append(RewriteStep()) } } label: { Label("Добавить", systemImage: "plus.circle") }
+                Button { withAnimation { steps.append(RewriteStep()) } } label: { Label("Add", systemImage: "plus.circle") }
                     .buttonStyle(.borderless).font(.system(size: 12))
             }
             ForEach(steps) { item in
@@ -301,8 +301,8 @@ struct RewriteFields: View {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
                         Picker("", selection: step.target) {
-                            Text("Запрос").tag(RewriteTarget.request)
-                            Text("Ответ").tag(RewriteTarget.response)
+                            Text("Compose").tag(RewriteTarget.request)
+                            Text("Size").tag(RewriteTarget.response)
                         }
                         .pickerStyle(.segmented).labelsHidden().fixedSize()
                         Picker("", selection: step.operation) {
@@ -318,13 +318,13 @@ struct RewriteFields: View {
                             TextField(keyPlaceholder(step.wrappedValue.operation), text: step.key).textFieldStyle(.roundedBorder)
                         }
                         if needsValue(step.wrappedValue.operation) {
-                            TextField(step.wrappedValue.operation == .setStatus ? "Код, например 500" : "Значение", text: step.value)
+                            TextField(step.wrappedValue.operation == .setStatus ? "Status, e.g. 500" : "Value", text: step.value)
                                 .textFieldStyle(.roundedBorder)
                         }
                     }
                     .font(.system(size: 12, design: .monospaced))
                     if step.wrappedValue.operation == .replaceBody || step.wrappedValue.operation == .replaceURL {
-                        Toggle("Регулярное выражение", isOn: step.useRegex).font(.system(size: 11))
+                        Toggle("Regex", isOn: step.useRegex).font(.system(size: 11))
                     }
                 }
                 .padding(10)
@@ -342,14 +342,14 @@ struct RewriteFields: View {
 
     private func title(_ op: RewriteOperation) -> String {
         switch op {
-        case .setHeader: return "Задать заголовок"
-        case .removeHeader: return "Удалить заголовок"
-        case .replaceBody: return "Заменить в теле"
-        case .setBody: return "Заменить тело целиком"
-        case .setStatus: return "Код ответа"
-        case .setQuery: return "Задать query-параметр"
-        case .removeQuery: return "Удалить query-параметр"
-        case .replaceURL: return "Заменить в URL"
+        case .setHeader: return "Set Header"
+        case .removeHeader: return "Remove Header"
+        case .replaceBody: return "Replace in Body"
+        case .setBody: return "Replace Whole Body"
+        case .setStatus: return "Status Code"
+        case .setQuery: return "Set Query Parameter"
+        case .removeQuery: return "Remove Query Parameter"
+        case .replaceURL: return "Replace in URL"
         }
     }
 
@@ -357,9 +357,9 @@ struct RewriteFields: View {
     private func needsValue(_ op: RewriteOperation) -> Bool { op != .removeHeader && op != .removeQuery }
     private func keyPlaceholder(_ op: RewriteOperation) -> String {
         switch op {
-        case .replaceBody, .replaceURL: return "Найти"
-        case .setQuery, .removeQuery: return "Параметр"
-        default: return "Заголовок"
+        case .replaceBody, .replaceURL: return "Find"
+        case .setQuery, .removeQuery: return "Parameter"
+        default: return "Header"
         }
     }
 }
@@ -368,9 +368,9 @@ struct BreakpointFields: View {
     @Binding var rule: Rule
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            FieldLabel(text: "Где останавливать")
-            Toggle("Перед отправкой запроса на сервер", isOn: $rule.breakOnRequest)
-            Toggle("После получения ответа", isOn: $rule.breakOnResponse)
+            FieldLabel(text: "Break On")
+            Toggle("Request (before it goes to the server)", isOn: $rule.breakOnRequest)
+            Toggle("Response (after it arrives)", isOn: $rule.breakOnResponse)
         }
         .font(.system(size: 12.5))
         .card()
@@ -381,11 +381,11 @@ struct BlockFields: View {
     @Binding var mode: BlockMode
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            FieldLabel(text: "Что делать")
+            FieldLabel(text: "Action")
             Picker("", selection: $mode) {
-                Text("Ответить 403 Forbidden").tag(BlockMode.forbidden)
-                Text("Ответить 404 Not Found").tag(BlockMode.notFound)
-                Text("Оборвать соединение").tag(BlockMode.dropConnection)
+                Text("Respond 403 Forbidden").tag(BlockMode.forbidden)
+                Text("Respond 404 Not Found").tag(BlockMode.notFound)
+                Text("Drop the connection").tag(BlockMode.dropConnection)
             }
             .pickerStyle(.radioGroup).labelsHidden()
         }
@@ -395,26 +395,26 @@ struct BlockFields: View {
 
 struct ThrottleFields: View {
     @Binding var action: ThrottleAction
-    private let presets: [(String, Int, Int)] = [("3G", 300, 750), ("Edge", 800, 240), ("Плохой Wi-Fi", 500, 1000), ("LTE", 80, 12000), ("Только задержка 2 с", 2000, 0)]
+    private let presets: [(String, Int, Int)] = [("3G", 300, 750), ("Edge", 800, 240), ("Bad Wi-Fi", 500, 1000), ("LTE", 80, 12000), ("Delay 2 s only", 2000, 0)]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            FieldLabel(text: "Сеть")
+            FieldLabel(text: "Network")
             HStack {
                 ForEach(presets, id: \.0) { p in
                     Button(p.0) { withAnimation { action.latencyMs = p.1; action.downloadKbps = p.2 } }
                 }
             }
             HStack {
-                Text("Задержка, мс").foregroundStyle(.secondary)
+                Text("Latency, ms").foregroundStyle(.secondary)
                 TextField("", value: $action.latencyMs, format: .number.grouping(.never)).textFieldStyle(.roundedBorder).frame(width: 90)
                 Slider(value: Binding(get: { Double(action.latencyMs) }, set: { action.latencyMs = Int($0) }), in: 0...5000)
             }
             HStack {
-                Text("Скорость, кбит/с").foregroundStyle(.secondary)
-                TextField("0 — без ограничений", value: $action.downloadKbps, format: .number.grouping(.never))
+                Text("Speed, kbit/s").foregroundStyle(.secondary)
+                TextField("0 = unlimited", value: $action.downloadKbps, format: .number.grouping(.never))
                     .textFieldStyle(.roundedBorder).frame(width: 90)
-                Text(action.downloadKbps == 0 ? "без ограничений" : "≈ \(action.downloadKbps / 8) КБ/с").foregroundStyle(.secondary)
+                Text(action.downloadKbps == 0 ? "unlimited" : "≈ \(action.downloadKbps / 8) KB/s").foregroundStyle(.secondary)
             }
         }
         .font(.system(size: 12))
@@ -431,15 +431,15 @@ struct ScriptFields: View {
             HStack {
                 FieldLabel(text: "JavaScript")
                 Spacer()
-                Button("Сбросить шаблон") { rule.script = Rule.defaultScript }.buttonStyle(.borderless).font(.system(size: 11))
+                Button("Reset Template") { rule.script = Rule.defaultScript }.buttonStyle(.borderless).font(.system(size: 11))
             }
             CodeView(text: rule.script, editable: true) { rule.script = $0 }
                 .frame(minHeight: 300)
                 .background(RoundedRectangle(cornerRadius: 8).fill(Theme.background))
                 .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Theme.stroke))
-            Text("request: method, url, headers, body · response: statusCode, headers, body. JSON-тело приходит объектом. console.log пишет в журнал ниже.")
+            Text("request: method, url, headers, body · response: statusCode, headers, body. A JSON body arrives as an object. console.log writes to the log below.")
                 .font(.system(size: 11)).foregroundStyle(.secondary)
-            FieldLabel(text: "Журнал")
+            FieldLabel(text: "Log")
             ScrollView {
                 Text(model.scriptLog.suffix(80).joined(separator: "\n"))
                     .font(.system(size: 11, design: .monospaced))

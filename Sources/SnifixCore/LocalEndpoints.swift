@@ -47,9 +47,9 @@ enum LocalEndpoints {
 
     private static func page(proxyHost: String, port: Int, caName: String) -> String {
         """
-        <!doctype html><html lang="ru"><head><meta charset="utf-8">
+        <!doctype html><html lang="en"><head><meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
-        <title>Snifix — сертификат</title>
+        <title>Snifix — certificate</title>
         <style>
         :root{color-scheme:dark}
         body{margin:0;font:16px -apple-system,system-ui,sans-serif;background:#0c0b10;color:#f2f0f7}
@@ -65,20 +65,20 @@ enum LocalEndpoints {
         code{background:#221f2b;padding:2px 6px;border-radius:6px;color:#ffd84a}
         </style></head><body><main>
         <h1>Snifix</h1>
-        <p>Сертификат «\(caName)» позволяет Snifix расшифровывать HTTPS этого устройства.</p>
-        <a class="btn" href="/cert">Скачать сертификат</a>
+        <p>The “\(caName)” certificate lets Snifix decrypt this device's HTTPS traffic.</p>
+        <a class="btn" href="/cert">Download Certificate</a>
         <div class="card"><h2>iPhone / iPad</h2><ol>
-        <li>Нажмите «Скачать сертификат» и «Разрешить».</li>
-        <li>Настройки → Основные → VPN и управление устройством → Snifix CA → Установить.</li>
-        <li>Настройки → Основные → Об этом устройстве → Доверие сертификатам → включите Snifix CA.</li>
-        <li>Wi‑Fi → (i) → Прокси → Авто: <code>http://\(proxyHost):\(port)/proxy.pac</code></li>
+        <li>Tap Download Certificate, then Allow.</li>
+        <li>Settings → General → VPN &amp; Device Management → Snifix CA → Install.</li>
+        <li>Settings → General → About → Certificate Trust Settings → turn on Snifix CA.</li>
+        <li>Wi‑Fi → (i) → Configure Proxy → Automatic: <code>http://\(proxyHost):\(port)/proxy.pac</code></li>
         </ol></div>
         <div class="card"><h2>Android</h2><ol>
-        <li>Скачайте сертификат.</li>
-        <li>Настройки → Безопасность → Шифрование и учётные данные → Установить сертификат → Сертификат ЦС.</li>
-        <li>Прокси Wi‑Fi: <code>\(proxyHost)</code>, порт <code>\(port)</code>. Или подключите телефон по USB — Snifix настроит всё сам.</li>
+        <li>Download the certificate.</li>
+        <li>Settings → Security → Encryption &amp; credentials → Install a certificate → CA certificate.</li>
+        <li>Wi‑Fi proxy: <code>\(proxyHost)</code>, port <code>\(port)</code>. Or connect the phone by USB — Snifix sets everything up.</li>
         </ol></div>
-        <a class="btn alt" href="/cert.pem">Сертификат в формате PEM</a>
+        <a class="btn alt" href="/cert.pem">Certificate as PEM</a>
         </main></body></html>
         """
     }

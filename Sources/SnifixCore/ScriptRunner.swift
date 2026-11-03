@@ -25,7 +25,7 @@ public actor ScriptRunner {
         c.setObject(console, forKeyedSubscript: "console" as NSString)
         c.exceptionHandler = { [weak self] _, exception in
             let text = exception?.toString() ?? "?"
-            Task { await self?.emit("[\(name)] Ошибка: \(text)") }
+            Task { await self?.emit("[\(name)] Error: \(text)") }
         }
         c.evaluateScript(rule.script)
         contexts[key] = c

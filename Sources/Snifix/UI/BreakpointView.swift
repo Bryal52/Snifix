@@ -61,14 +61,14 @@ struct BreakpointsView: View {
     var body: some View {
         Group {
             if model.breakpoints.isEmpty {
-                EmptyState(symbol: "pause.circle", title: "Нет остановленных запросов",
-                           subtitle: "Добавьте точку останова в «Правила → Точки останова» или через правый клик по запросу.")
+                EmptyState(symbol: "pause.circle", title: "No paused requests",
+                           subtitle: "Add a breakpoint in Rules → Breakpoints or right-click a request.")
             } else {
                 HSplitView {
                     List(model.breakpoints, selection: $selected) { b in
                         VStack(alignment: .leading, spacing: 2) {
                             HStack {
-                                Badge(text: isRequest(b) ? "ЗАПРОС" : "ОТВЕТ", color: isRequest(b) ? Theme.gold : .green)
+                                Badge(text: isRequest(b) ? "REQUEST" : "RESPONSE", color: isRequest(b) ? Theme.gold : .green)
                                 Text("#\(b.event.flowID)").foregroundStyle(.secondary)
                             }
                             Text(url(b)).font(.system(size: 11, design: .monospaced)).lineLimit(1).truncationMode(.middle)
@@ -116,20 +116,20 @@ struct BreakpointsView: View {
         VStack(alignment: .leading, spacing: 10) {
             if isRequest(b) {
                 HStack {
-                    TextField("Метод", text: d.method).textFieldStyle(.roundedBorder).frame(width: 90)
+                    TextField("Method", text: d.method).textFieldStyle(.roundedBorder).frame(width: 90)
                     TextField("URL", text: d.url).textFieldStyle(.roundedBorder)
                 }
                 .font(.system(size: 12.5, design: .monospaced))
             } else {
                 HStack {
-                    Text("Код").foregroundStyle(.secondary)
+                    Text("Status").foregroundStyle(.secondary)
                     TextField("", value: d.statusCode, format: .number.grouping(.never)).textFieldStyle(.roundedBorder).frame(width: 80)
                     Text(url(b)).font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary).lineLimit(1)
                 }
             }
-            FieldLabel(text: "Заголовки")
+            FieldLabel(text: "Headers")
             ScrollView { HeadersEditor(headers: d.headers) }.frame(maxHeight: 180)
-            FieldLabel(text: "Тело")
+            FieldLabel(text: "Body")
             CodeView(text: d.wrappedValue.body, editable: true) { text in
                 var v = d.wrappedValue
                 v.body = text
@@ -138,10 +138,10 @@ struct BreakpointsView: View {
             }
             .background(RoundedRectangle(cornerRadius: 8).fill(Theme.surface))
             HStack {
-                Button("Прервать", role: .destructive) { resolve(b, .abort) }
+                Button("Abort", role: .destructive) { resolve(b, .abort) }
                 Spacer()
-                Button("Продолжить без изменений") { resolve(b, original(b)) }
-                Button("Выполнить") { resolve(b, edited(b, d.wrappedValue)) }
+                Button("Continue Unchanged") { resolve(b, original(b)) }
+                Button("Execute") { resolve(b, edited(b, d.wrappedValue)) }
                     .keyboardShortcut(.return, modifiers: .command)
                     .buttonStyle(.borderedProminent)
                     .tint(Theme.amber)
@@ -186,7 +186,7 @@ final class ComposeState {
     var sending = false
     var lastDuration: TimeInterval?
     var responseEdited = false
-    /// Map Local rule made from this window, updated on the next "Подменять".
+    /// Map Local rule made from this window, updated on the next "Mock This Response".
     var mockRuleID: UUID?
 
     init() {
@@ -233,8 +233,8 @@ final class ComposeState {
 struct ComposeView: View {
     @Environment(AppModel.self) private var model
     @UIState private var state = ComposeState.shared
-    @UIState private var requestTab = "Тело"
-    @UIState private var responseTab = "Тело"
+    @UIState private var requestTab = "Body"
+    @UIState private var responseTab = "Body"
 
     var body: some View {
         HSplitView {
@@ -250,10 +250,10 @@ struct ComposeView: View {
     private var requestPane: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("ЗАПРОС").font(.system(size: 12, weight: .bold)).foregroundStyle(Theme.goldGradient)
+                Text("REQUEST").font(.system(size: 12, weight: .bold)).foregroundStyle(Theme.goldGradient)
                 Spacer()
                 if state.template != nil {
-                    Button("Сбросить") { if let t = state.template { state.request = EditableMessage(request: t); state.request.bodyEdited = false } }
+                    Button("Reset") { if let t = state.template { state.request = EditableMessage(request: t); state.request.bodyEdited = false } }
                         .buttonStyle(.borderless).font(.system(size: 11))
                 }
             }
@@ -266,18 +266,18 @@ struct ComposeView: View {
                     .font(.system(size: 12.5, design: .monospaced))
             }
             HStack {
-                GoldSegments(items: ["Заголовки", "Тело"].map(TabName.init), selection: Binding(
+                GoldSegments(items: ["Headers", "Body"].map(TabName.init), selection: Binding(
                     get: { TabName(requestTab) }, set: { requestTab = $0.id })) { t in
-                    t.id == "Заголовки" ? "Заголовки \(state.request.headers.count)" : "Тело"
+                    t.id == "Headers" ? "Headers \(state.request.headers.count)" : "Body"
                 }
                 Spacer()
-                if requestTab == "Тело" {
-                    Button("Форматировать JSON") { state.request.body = JSONPretty.format(state.request.body); state.request.bodyEdited = true }
+                if requestTab == "Body" {
+                    Button("Format JSON") { state.request.body = JSONPretty.format(state.request.body); state.request.bodyEdited = true }
                         .buttonStyle(.borderless).font(.system(size: 11))
                 }
             }
             Group {
-                if requestTab == "Заголовки" {
+                if requestTab == "Headers" {
                     ScrollView { HeadersEditor(headers: $state.request.headers) }
                 } else {
                     CodeView(text: state.request.body, editable: true) { state.request.body = $0; state.request.bodyEdited = true }
@@ -286,7 +286,7 @@ struct ComposeView: View {
             }
             .frame(maxHeight: .infinity)
             HStack {
-                Text("Запрос пройдёт через правила и появится в списке как «Snifix».")
+                Text("The request goes through your rules and shows up in the list as “Snifix”.")
                     .font(.system(size: 11)).foregroundStyle(.secondary)
                 Spacer()
                 Button {
@@ -295,7 +295,7 @@ struct ComposeView: View {
                     HStack(spacing: 6) {
                         if state.sending { ProgressView().controlSize(.small) }
                         else { Image(systemName: "paperplane.fill") }
-                        Text("Отправить")
+                        Text("Send")
                     }
                     .frame(minWidth: 110)
                 }
@@ -312,31 +312,31 @@ struct ComposeView: View {
     private var responsePane: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("ОТВЕТ").font(.system(size: 12, weight: .bold)).foregroundStyle(Theme.goldGradient)
+                Text("RESPONSE").font(.system(size: 12, weight: .bold)).foregroundStyle(Theme.goldGradient)
                 if let r = state.response {
                     Text("\(r.statusCode) \(ResponseData.standardReason(r.statusCode))")
                         .font(.system(size: 11.5, weight: .medium, design: .monospaced))
                         .foregroundStyle(Theme.statusColor(r.statusCode))
                         .contentTransition(.numericText())
                 }
-                if state.responseEdited { Badge(text: "изменён") }
+                if state.responseEdited { Badge(text: "edited") }
                 Spacer()
                 if let d = state.lastDuration { Text(formatDuration(d)).font(.system(size: 11)).foregroundStyle(.secondary) }
             }
             if state.response != nil {
                 let response = Binding(get: { state.response ?? EditableMessage() }, set: { state.response = $0; state.responseEdited = true })
                 HStack {
-                    Text("Код").font(.system(size: 12)).foregroundStyle(.secondary)
+                    Text("Status").font(.system(size: 12)).foregroundStyle(.secondary)
                     TextField("", value: response.statusCode, format: .number.grouping(.never))
                         .textFieldStyle(.roundedBorder).frame(width: 70)
                     Spacer()
-                    GoldSegments(items: ["Заголовки", "Тело"].map(TabName.init), selection: Binding(
+                    GoldSegments(items: ["Headers", "Body"].map(TabName.init), selection: Binding(
                         get: { TabName(responseTab) }, set: { responseTab = $0.id })) { t in
-                        t.id == "Заголовки" ? "Заголовки \(state.response?.headers.count ?? 0)" : "Тело"
+                        t.id == "Headers" ? "Headers \(state.response?.headers.count ?? 0)" : "Body"
                     }
                 }
                 Group {
-                    if responseTab == "Заголовки" {
+                    if responseTab == "Headers" {
                         ScrollView { HeadersEditor(headers: response.headers) }
                     } else {
                         CodeView(text: state.response?.body ?? "", json: true, editable: true) { text in
@@ -350,12 +350,12 @@ struct ComposeView: View {
                 .frame(maxHeight: .infinity)
                 .transition(.opacity)
                 HStack(spacing: 8) {
-                    Button("Форматировать JSON") {
+                    Button("Format JSON") {
                         if let b = state.response?.body { state.response?.body = JSONPretty.format(b) }
                     }
                     .buttonStyle(.borderless).font(.system(size: 11))
                     if state.responseEdited, let o = state.original {
-                        Button("Вернуть ответ сервера") {
+                        Button("Restore Server Response") {
                             state.response = EditableMessage(response: o)
                             state.responseEdited = false
                         }
@@ -363,19 +363,19 @@ struct ComposeView: View {
                     }
                     Spacer()
                     if let id = state.mockRuleID, model.rules.rules.contains(where: { $0.id == id && $0.enabled }) {
-                        Button("Выключить подмену") { setMock(enabled: false) }
+                        Button("Stop Mocking") { setMock(enabled: false) }
                     }
                     Button {
                         applyMock()
                     } label: {
-                        Label(state.mockRuleID == nil ? "Подменять этот ответ" : "Обновить подмену", systemImage: "doc.badge.arrow.up")
+                        Label(state.mockRuleID == nil ? "Mock This Response" : "Update Mock", systemImage: "doc.badge.arrow.up")
                     }
                     .buttonStyle(.borderedProminent).tint(Theme.amber).controlSize(.large)
-                    .help("Создаёт правило Map Local: приложение будет получать этот ответ вместо ответа сервера")
+                    .help("Creates a Map Local rule: the app receives this response instead of the server's")
                 }
             } else {
-                EmptyState(symbol: "arrow.left.circle", title: state.sending ? "Отправляем…" : "Ответа пока нет",
-                           subtitle: "Нажмите «Отправить» (⌘↩) — ответ сервера появится здесь, его можно изменить и подменять для приложения.")
+                EmptyState(symbol: "arrow.left.circle", title: state.sending ? "Sending…" : "No response yet",
+                           subtitle: "Press Send (⌘↩). The server's response appears here — edit it and mock it for the app.")
             }
         }
         .padding(14)
@@ -389,7 +389,7 @@ struct ComposeView: View {
         var request = state.request.apply(to: base)
         if state.template == nil { request.body = Data(state.request.body.utf8) }
         guard !request.host.isEmpty else {
-            model.showToast("Укажите полный URL", symbol: "exclamationmark.triangle.fill")
+            model.showToast("Enter a full URL", symbol: "exclamationmark.triangle.fill")
             return
         }
         state.sending = true
@@ -404,7 +404,7 @@ struct ComposeView: View {
                 state.response = response.map { EditableMessage(response: $0) }
                 state.responseEdited = false
             }
-            if response == nil { model.showToast("Сервер не ответил", symbol: "exclamationmark.triangle.fill") }
+            if response == nil { model.showToast("The server did not respond", symbol: "exclamationmark.triangle.fill") }
         }
     }
 
@@ -430,13 +430,13 @@ struct ComposeView: View {
             model.rules.rules.append(rule)
         }
         state.mockRuleID = rule.id
-        model.showToast("Приложение будет получать этот ответ · Map Local «\(rule.name)»", symbol: "doc.badge.arrow.up.fill")
+        model.showToast("The app now receives this response · Map Local “\(rule.name)”", symbol: "doc.badge.arrow.up.fill")
     }
 
     private func setMock(enabled: Bool) {
         guard let id = state.mockRuleID, let i = model.rules.rules.firstIndex(where: { $0.id == id }) else { return }
         model.rules.rules[i].enabled = enabled
-        model.showToast(enabled ? "Подмена включена" : "Подмена выключена — снова отвечает сервер")
+        model.showToast(enabled ? "Mock enabled" : "Mock disabled — the server answers again")
     }
 }
 

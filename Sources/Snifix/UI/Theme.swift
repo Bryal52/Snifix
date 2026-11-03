@@ -175,15 +175,15 @@ extension View {
 
 func formatBytes(_ n: Int) -> String {
     if n <= 0 { return "—" }
-    if n < 1024 { return "\(n) Б" }
-    if n < 1024 * 1024 { return String(format: "%.1f КБ", Double(n) / 1024) }
-    return String(format: "%.1f МБ", Double(n) / 1024 / 1024)
+    if n < 1024 { return "\(n) B" }
+    if n < 1024 * 1024 { return String(format: "%.1f KB", Double(n) / 1024) }
+    return String(format: "%.1f MB", Double(n) / 1024 / 1024)
 }
 
 func formatDuration(_ s: Double) -> String {
     if s < 0 { return "…" }
-    if s < 1 { return "\(Int(s * 1000)) мс" }
-    return String(format: "%.2f с", s)
+    if s < 1 { return "\(Int(s * 1000)) ms" }
+    return String(format: "%.2f s", s)
 }
 
 let timeFormatter: DateFormatter = {

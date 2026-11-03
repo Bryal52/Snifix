@@ -379,13 +379,13 @@ final class HandshakeObserver: ChannelInboundHandler, RemovableChannelHandler {
         let (neverAccepted, hosts) = engine.markRejected(host: host, client: client)
         let request = RequestData(method: "CONNECT", scheme: "https", host: host, port: port, path: "/", headers: [], body: Data())
         let recorder = engine.makeRecorder(request: request, client: client, isSSL: true)
-        let bypass = engine.settings.autoBypassPinned ? " Пока соединения к этому хосту идут без расшифровки." : ""
+        let bypass = engine.settings.autoBypassPinned ? " Connections to this host are tunneled without decryption for now." : ""
         if neverAccepted && hosts >= 2 {
-            recorder?.fail("Устройство не доверяет сертификату Snifix. На iPhone: Настройки → Основные → Об этом устройстве → Доверие сертификатам → включите Snifix CA. На Android приложение должно разрешать пользовательские сертификаты.\(bypass)")
+            recorder?.fail("The device does not trust the Snifix certificate. On iPhone: Settings → General → About → Certificate Trust Settings → turn on Snifix CA. On Android the app must allow user certificates.\(bypass)")
         } else if neverAccepted {
-            recorder?.fail("Клиент не принял сертификат Snifix: сертификат не установлен или не доверен на устройстве, либо приложение использует пиннинг.\(bypass)")
+            recorder?.fail("The client rejected the Snifix certificate: it is not installed or not trusted on the device, or the app pins certificates.\(bypass)")
         } else {
-            recorder?.fail("Клиент не принял сертификат Snifix, хотя другим хостам доверяет — это пиннинг сертификата в приложении.\(bypass)")
+            recorder?.fail("The client rejected the Snifix certificate although it trusts it for other hosts — the app pins certificates.\(bypass)")
         }
     }
 }

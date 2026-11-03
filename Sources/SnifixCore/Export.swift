@@ -36,7 +36,7 @@ public enum Export {
     static func bodyText(_ body: Data, headers: [HTTPHeader]) -> String {
         let decoded = BodyCodec.decoded(body, headers: headers)
         if let s = String(data: decoded, encoding: .utf8) { return s }
-        return "<\(decoded.count) байт двоичных данных>"
+        return "<\(decoded.count) bytes of binary data>"
     }
 
     /// HTTP Archive 1.2, readable by browsers' devtools, Charles, Proxyman and others.

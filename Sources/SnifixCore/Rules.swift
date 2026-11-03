@@ -84,13 +84,13 @@ public struct Rule: Codable, Identifiable, Hashable, Sendable {
     }
 
     public static let defaultScript = """
-    // Вызывается перед отправкой запроса на сервер.
+    // Called before the request goes to the server.
     function onRequest(context, url, request) {
       // request.headers["X-Debug"] = "1";
       return request;
     }
 
-    // Вызывается после получения ответа. Если тело — JSON, response.body уже объект.
+    // Called when the response arrives. A JSON body is already an object in response.body.
     function onResponse(context, url, request, response) {
       // response.body.debug = true;
       return response;

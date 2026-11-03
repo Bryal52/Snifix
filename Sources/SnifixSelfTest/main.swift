@@ -141,11 +141,11 @@ _ = curlNoCA("https://www.example.org/", proxy: lan)
 _ = curlNoCA("https://www.wikipedia.org/", proxy: lan)
 Thread.sleep(forTimeInterval: 0.3)
 check("Недоверенный сертификат распознан", sink.lock.withLock { sink.flows.values.contains { f in
-    if case .failed(let m) = f.state { return m.contains("не доверяет") }; return false } })
+    if case .failed(let m) = f.state { return m.contains("does not trust") }; return false } })
 engine.clearAutoBypass(client: "127.0.0.1")
 check("После сброса хост снова расшифровывается", curlNoCA("https://www.wikipedia.org/") != 0)
 check("Пиннинг: ошибка записана", sink.lock.withLock { sink.flows.values.contains { f in
-    if case .failed(let m) = f.state { return f.request.host == "www.wikipedia.org" && (m.contains("пиннинг") || m.contains("не доверен")) }; return false } })
+    if case .failed(let m) = f.state { return f.request.host == "www.wikipedia.org" && (m.contains("pins") || m.contains("not trusted")) }; return false } })
 
 engine.rules.sslBypass = ["example.com"]
 (out, code) = curl(["https://example.com/mock/profile"])

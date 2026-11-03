@@ -15,8 +15,8 @@ struct DetailView: View {
                 .id(flow.id)
                 .transition(.opacity)
             } else {
-                EmptyState(symbol: "sparkle.magnifyingglass", title: "Выберите запрос",
-                           subtitle: "Здесь появятся заголовки, тело, cookies и всё остальное.")
+                EmptyState(symbol: "sparkle.magnifyingglass", title: "Select a request",
+                           subtitle: "Headers, body, cookies and more appear here.")
             }
         }
         .animation(.easeInOut(duration: 0.18), value: model.focusedID)
@@ -24,12 +24,12 @@ struct DetailView: View {
 }
 
 enum RequestTab: String, CaseIterable, Identifiable {
-    case headers = "Заголовки", query = "Query", body = "Тело", cookies = "Cookies", raw = "Raw", summary = "Сводка"
+    case headers = "Headers", query = "Query", body = "Body", cookies = "Cookies", raw = "Raw", summary = "Summary"
     var id: String { rawValue }
 }
 
 enum ResponseTab: String, CaseIterable, Identifiable {
-    case headers = "Заголовки", body = "Тело", tree = "JSON", cookies = "Cookies", raw = "Raw", messages = "Сообщения"
+    case headers = "Headers", body = "Body", tree = "JSON", cookies = "Cookies", raw = "Raw", messages = "Messages"
     var id: String { rawValue }
 }
 
@@ -60,16 +60,16 @@ struct RequestPane: View {
         let tab = Binding(get: { RequestTab(rawValue: tabRaw) ?? .headers }, set: { tabRaw = $0.rawValue })
         let r = flow.request
         VStack(alignment: .leading, spacing: 8) {
-            PaneHeader(title: "ЗАПРОС", subtitle: "\(r.method) \(r.path)", color: Theme.methodColor(r.method)) {
+            PaneHeader(title: "REQUEST", subtitle: "\(r.method) \(r.path)", color: Theme.methodColor(r.method)) {
                 Button { model.repeatRequest(r) } label: { Image(systemName: "arrow.clockwise") }
-                    .buttonStyle(.borderless).help("Повторить")
+                    .buttonStyle(.borderless).help("Repeat")
             }
             HStack {
                 GoldSegments(items: RequestTab.allCases, selection: tab) { t in
                     switch t {
-                    case .headers: return "Заголовки \(r.headers.count)"
+                    case .headers: return "Headers \(r.headers.count)"
                     case .query: return r.queryItems.isEmpty ? "Query" : "Query \(r.queryItems.count)"
-                    case .body: return r.body.isEmpty ? "Тело" : "Тело · \(formatBytes(r.body.count))"
+                    case .body: return r.body.isEmpty ? "Body" : "Body · \(formatBytes(r.body.count))"
                     default: return t.rawValue
                     }
                 }
@@ -80,9 +80,9 @@ struct RequestPane: View {
             Group {
                 switch tab.wrappedValue {
                 case .headers: HeaderList(headers: r.headers)
-                case .query: HeaderList(headers: r.queryItems, empty: "Нет параметров")
+                case .query: HeaderList(headers: r.queryItems, empty: "No query parameters")
                 case .body: BodyView(data: r.body, headers: r.headers, fileName: "request")
-                case .cookies: HeaderList(headers: Cookies.fromRequest(r.headers), empty: "Нет cookies")
+                case .cookies: HeaderList(headers: Cookies.fromRequest(r.headers), empty: "No cookies")
                 case .raw: CodeView(text: Export.rawRequest(r))
                 case .summary: SummaryView(flow: flow)
                 }
@@ -103,16 +103,16 @@ struct ResponsePane: View {
         let tab = Binding(get: { current }, set: { tabRaw = $0.rawValue })
         VStack(alignment: .leading, spacing: 8) {
             if let res = flow.response {
-                PaneHeader(title: "ОТВЕТ", subtitle: "\(res.statusCode) \(res.reason)",
+                PaneHeader(title: "RESPONSE", subtitle: "\(res.statusCode) \(res.reason)",
                            color: Theme.statusColor(res.statusCode)) {
                     if let d = flow.duration { Text(formatDuration(d)).font(.system(size: 11)).foregroundStyle(.secondary) }
                 }
                 HStack {
                     GoldSegments(items: tabs, selection: tab) { t in
                         switch t {
-                        case .headers: return "Заголовки \(res.headers.count)"
-                        case .body: return res.body.isEmpty ? "Тело" : "Тело · \(formatBytes(res.body.count))"
-                        case .messages: return "Сообщения \(flow.webSocketMessages.count)"
+                        case .headers: return "Headers \(res.headers.count)"
+                        case .body: return res.body.isEmpty ? "Body" : "Body · \(formatBytes(res.body.count))"
+                        case .messages: return "Messages \(flow.webSocketMessages.count)"
                         default: return t.rawValue
                         }
                     }
@@ -125,24 +125,24 @@ struct ResponsePane: View {
                     case .headers: HeaderList(headers: res.headers)
                     case .body: BodyView(data: res.body, headers: res.headers, fileName: "response")
                     case .tree: JSONTree(data: BodyCodec.decoded(res.body, headers: res.headers))
-                    case .cookies: HeaderList(headers: Cookies.fromResponse(res.headers), empty: "Нет cookies")
+                    case .cookies: HeaderList(headers: Cookies.fromResponse(res.headers), empty: "No cookies")
                     case .raw: CodeView(text: Export.rawResponse(res))
                     case .messages: WebSocketList(messages: flow.webSocketMessages)
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                PaneHeader(title: "ОТВЕТ", subtitle: "", color: .secondary) { EmptyView() }
+                PaneHeader(title: "RESPONSE", subtitle: "", color: .secondary) { EmptyView() }
                 switch flow.state {
                 case .failed(let message):
-                    EmptyState(symbol: "xmark.octagon", title: "Ошибка", subtitle: message)
+                    EmptyState(symbol: "xmark.octagon", title: "Error", subtitle: message)
                 case .paused:
-                    EmptyState(symbol: "pause.circle", title: "Остановлено на точке останова", subtitle: "Откройте окно точек останова, чтобы продолжить.")
+                    EmptyState(symbol: "pause.circle", title: "Paused at a breakpoint", subtitle: "Open the Breakpoints window to continue.")
                 case .tunnel:
-                    EmptyState(symbol: "lock.shield", title: "Туннель без расшифровки",
-                               subtitle: "↑ \(formatBytes(flow.tunnelBytesUp))  ↓ \(formatBytes(flow.tunnelBytesDown))\nХост в исключениях SSL, в allow-list не входит или клиент не принял сертификат.")
+                    EmptyState(symbol: "lock.shield", title: "Tunnel without decryption",
+                               subtitle: "↑ \(formatBytes(flow.tunnelBytesUp))  ↓ \(formatBytes(flow.tunnelBytesDown))\nThe host is in SSL Bypass, outside the Allow List, or the client rejected the certificate.")
                 default:
-                    VStack { Spacer(); ProgressView().controlSize(.small); Text("Ждём ответ…").font(.caption).foregroundStyle(.secondary); Spacer() }
+                    VStack { Spacer(); ProgressView().controlSize(.small); Text("Waiting for response…").font(.caption).foregroundStyle(.secondary); Spacer() }
                         .frame(maxWidth: .infinity)
                 }
             }
@@ -153,7 +153,7 @@ struct ResponsePane: View {
 
 struct HeaderList: View {
     let headers: [HTTPHeader]
-    var empty = "Нет заголовков"
+    var empty = "No headers"
     @Environment(AppModel.self) private var model
 
     var body: some View {
@@ -175,8 +175,8 @@ struct HeaderList: View {
                         .padding(.horizontal, 12).padding(.vertical, 4)
                         .background(i % 2 == 0 ? Color.clear : Color.primary.opacity(0.03))
                         .contextMenu {
-                            Button("Копировать значение") { model.copy(h.value) }
-                            Button("Копировать «\(h.name): …»") { model.copy("\(h.name): \(h.value)") }
+                            Button("Copy Value") { model.copy(h.value) }
+                            Button("Copy “\(h.name): …”") { model.copy("\(h.name): \(h.value)") }
                         }
                     }
                 }
@@ -197,7 +197,7 @@ struct BodyView: View {
         let decoded = BodyCodec.decoded(data, headers: headers)
         let type = headers["Content-Type"]?.lowercased() ?? ""
         if decoded.isEmpty {
-            EmptyState(symbol: "doc", title: "Пустое тело", subtitle: "")
+            EmptyState(symbol: "doc", title: "Empty body", subtitle: "")
         } else if type.hasPrefix("image/"), let image = NSImage(data: decoded) {
             VStack {
                 Image(nsImage: image).resizable().aspectRatio(contentMode: .fit)
@@ -211,11 +211,11 @@ struct BodyView: View {
             let isJSON = type.contains("json") || JSONPretty.isJSON(text)
             VStack(spacing: 0) {
                 HStack(spacing: 10) {
-                    if isJSON { Toggle("Форматировать", isOn: $pretty).toggleStyle(.switch).controlSize(.mini) }
+                    if isJSON { Toggle("Pretty Print", isOn: $pretty).toggleStyle(.switch).controlSize(.mini) }
                     if BodyCodec.isEncoded(headers) { Badge(text: headers["Content-Encoding"] ?? "", color: .secondary) }
                     Spacer()
-                    Button("Копировать") { model.copy(text) }.buttonStyle(.borderless)
-                    Button("Сохранить…") { save(decoded) }.buttonStyle(.borderless)
+                    Button("Copy") { model.copy(text) }.buttonStyle(.borderless)
+                    Button("Save…") { save(decoded) }.buttonStyle(.borderless)
                 }
                 .font(.system(size: 11))
                 .padding(.horizontal, 12).padding(.vertical, 4)
@@ -224,9 +224,9 @@ struct BodyView: View {
         } else {
             VStack(spacing: 0) {
                 HStack {
-                    Text("Двоичные данные · \(formatBytes(decoded.count))").font(.system(size: 11)).foregroundStyle(.secondary)
+                    Text("Binary data · \(formatBytes(decoded.count))").font(.system(size: 11)).foregroundStyle(.secondary)
                     Spacer()
-                    Button("Сохранить…") { save(decoded) }.buttonStyle(.borderless).font(.system(size: 11))
+                    Button("Save…") { save(decoded) }.buttonStyle(.borderless).font(.system(size: 11))
                 }
                 .padding(.horizontal, 12).padding(.vertical, 4)
                 CodeView(text: hexDump(decoded.prefix(64 * 1024)))
@@ -260,7 +260,7 @@ struct JSONTree: View {
         if let obj = try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed]) {
             JSONTreeView(root: JSONNode.build(obj))
         } else {
-            EmptyState(symbol: "curlybraces", title: "Это не JSON", subtitle: "Дерево доступно для JSON-ответов.")
+            EmptyState(symbol: "curlybraces", title: "Not JSON", subtitle: "The tree view is available for JSON responses.")
         }
     }
 }
@@ -271,7 +271,7 @@ struct WebSocketList: View {
 
     var body: some View {
         if messages.isEmpty {
-            EmptyState(symbol: "bolt.horizontal", title: "Сообщений пока нет", subtitle: "")
+            EmptyState(symbol: "bolt.horizontal", title: "No messages yet", subtitle: "")
         } else {
             VSplitView {
                 List(messages.filter { $0.opcode != 9 && $0.opcode != 10 }, selection: $selected) { m in
@@ -296,9 +296,9 @@ struct WebSocketList: View {
 
     private func opcodeName(_ m: WebSocketMessage) -> String {
         switch m.opcode {
-        case 2: return "<двоичные \(m.payload.count) Б>"
-        case 8: return "<закрытие>"
-        case 0: return "<продолжение \(m.payload.count) Б>"
+        case 2: return "<binary \(m.payload.count) B>"
+        case 8: return "<close>"
+        case 0: return "<continuation \(m.payload.count) B>"
         default: return "<opcode \(m.opcode)>"
         }
     }
@@ -310,24 +310,24 @@ struct SummaryView: View {
         ScrollView {
             Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 7) {
                 row("URL", flow.request.url)
-                row("Клиент", [flow.client.appName, flow.client.deviceName].compactMap { $0 }.joined(separator: " · "))
-                row("Адрес клиента", "\(flow.client.address):\(flow.client.port)")
-                if let b = flow.client.bundlePath { row("Программа", b) }
-                row("Начало", timeFormatter.string(from: flow.startedAt))
-                if let d = flow.duration { row("Длительность", formatDuration(d)) }
-                if let s = flow.responseStartedAt { row("До ответа", formatDuration(s.timeIntervalSince(flow.startedAt))) }
-                row("HTTPS", flow.isSSL ? "Да, расшифрован Snifix" : "Нет")
-                row("Протокол клиента", flow.request.version)
-                if let r = flow.response { row("Протокол сервера", r.version) }
-                if let t = flow.response?.trailers, !t.isEmpty { row("Трейлеры", t.map { "\($0.name): \($0.value)" }.joined(separator: "\n")) }
-                row("Размер запроса", formatBytes(flow.request.body.count))
+                row("Client", [flow.client.appName, flow.client.deviceName].compactMap { $0 }.joined(separator: " · "))
+                row("Client Address", "\(flow.client.address):\(flow.client.port)")
+                if let b = flow.client.bundlePath { row("Program", b) }
+                row("Started", timeFormatter.string(from: flow.startedAt))
+                if let d = flow.duration { row("Duration", formatDuration(d)) }
+                if let s = flow.responseStartedAt { row("Time to Response", formatDuration(s.timeIntervalSince(flow.startedAt))) }
+                row("HTTPS", flow.isSSL ? "Yes, decrypted by Snifix" : "No")
+                row("Client Protocol", flow.request.version)
+                if let r = flow.response { row("Server Protocol", r.version) }
+                if let t = flow.response?.trailers, !t.isEmpty { row("Trailers", t.map { "\($0.name): \($0.value)" }.joined(separator: "\n")) }
+                row("Request Size", formatBytes(flow.request.body.count))
                 if let r = flow.response {
-                    row("Размер ответа", formatBytes(r.body.count))
+                    row("Response Size", formatBytes(r.body.count))
                     let decoded = BodyCodec.decoded(r.body, headers: r.headers).count
-                    if decoded != r.body.count { row("После распаковки", formatBytes(decoded)) }
+                    if decoded != r.body.count { row("Decompressed", formatBytes(decoded)) }
                 }
-                if !flow.matchedRules.isEmpty { row("Правила", flow.matchedRules.joined(separator: ", ")) }
-                if case .failed(let m) = flow.state { row("Ошибка", m) }
+                if !flow.matchedRules.isEmpty { row("Rules", flow.matchedRules.joined(separator: ", ")) }
+                if case .failed(let m) = flow.state { row("Error", m) }
             }
             .font(.system(size: 12))
             .padding(14)

@@ -228,7 +228,7 @@ public final class ProxyEngine: @unchecked Sendable {
         if let rule = doc.activeRules(.block).first(where: { $0.matcher.matches(request) }) {
             recorder?.addRule(rule.name)
             if rule.blockMode == .dropConnection {
-                recorder?.fail("Соединение сброшено правилом «\(rule.name)»")
+                recorder?.fail("Connection dropped by rule “\(rule.name)”")
                 return .drop
             }
             let response = ResponseData(statusCode: rule.blockMode == .forbidden ? 403 : 404,
@@ -249,7 +249,7 @@ public final class ProxyEngine: @unchecked Sendable {
                 recorder?.update { $0.state = .paused }
                 let decision = await handler(BreakpointEvent(flowID: flowID, ruleName: rule.name, phase: .request(request)))
                 guard case .proceedRequest(let edited) = decision else {
-                    recorder?.fail("Прервано на точке останова")
+                    recorder?.fail("Aborted at a breakpoint")
                     return .drop
                 }
                 request = edited
@@ -293,7 +293,7 @@ public final class ProxyEngine: @unchecked Sendable {
             recorder?.update { $0.state = .paused; $0.response = response }
             let decision = await handler(BreakpointEvent(flowID: flowID, ruleName: rule.name, phase: .response(request, response)))
             guard case .proceedResponse(let edited) = decision else {
-                recorder?.fail("Прервано на точке останова")
+                recorder?.fail("Aborted at a breakpoint")
                 return .drop
             }
             response = edited
@@ -353,18 +353,18 @@ enum ProxyErrors {
             if case .handshakeFailed(let inner) = e {
                 let text = "\(inner)"
                 if text.contains("CERTIFICATE_VERIFY_FAILED") {
-                    return "Сертификат сервера не прошёл проверку. Если это тестовый сервер, выключите «Проверять сертификаты серверов» в настройках."
+                    return "The server certificate failed verification. For a test server, turn off “Verify server certificates” in Settings."
                 }
-                return "Ошибка TLS с сервером: \(text)"
+                return "TLS error with the server: \(text)"
             }
-            return "Ошибка TLS: \(e)"
+            return "TLS error: \(e)"
         }
         if let e = error as? UpstreamError { return e.message }
-        if let e = error as? IOError { return "Сетевая ошибка: \(e.description)" }
-        if error is ChannelError { return "Соединение с сервером закрыто" }
+        if let e = error as? IOError { return "Network error: \(e.description)" }
+        if error is ChannelError { return "The server closed the connection" }
         if let e = error as? NIOConnectionError {
-            if e.dnsAAAAError != nil || e.dnsAError != nil { return "Не удалось найти адрес хоста \(e.host)" }
-            return "Не удалось подключиться к \(e.host):\(e.port)"
+            if e.dnsAAAAError != nil || e.dnsAError != nil { return "Could not resolve host \(e.host)" }
+            return "Could not connect to \(e.host):\(e.port)"
         }
         return "\(error)"
     }
@@ -381,8 +381,8 @@ enum UpstreamError: Error {
     case timeout
     var message: String {
         switch self {
-        case .closed: return "Сервер закрыл соединение, не ответив"
-        case .timeout: return "Сервер не ответил за 120 секунд"
+        case .closed: return "The server closed the connection without a response"
+        case .timeout: return "The server did not respond within 120 seconds"
         }
     }
 }
