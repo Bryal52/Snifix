@@ -13,7 +13,14 @@
   cookies/raw/сводка, повтор и Compose, HAR, cURL, сессии .snifix
 - Определение клиента: процесс Mac по порту (libproc), приложение телефона по User-Agent
 
+## Windows (1.1.0)
+- Отдельная версия в `windows/`: .NET 10 + Avalonia, Titanium.Web.Proxy, Jint; тот же формат rules.json
+- Перехват HTTP/HTTPS/HTTP2, системный прокси Windows, установка сертификата, Map Local, Map Remote, Rewrite, Block List,
+  Network Conditions, Scripting, SSL Bypass, Edit & Send с подменой ответа, дерево устройств, Devices (iPhone/Android по Wi-Fi), донат
+- GitHub Actions: сборка win-x64, автотест прокси на Windows, установщик Inno Setup и zip, прикрепление к релизу
+
 ## Дальше
+- Windows: Breakpoints, DNS, Allow List, сообщения WebSocket, иконки приложений, Android по USB
 - Snifix Agent для Android (снимает прокси при отключении кабеля) — нужен Android SDK + Java
 - Просмотр gRPC/Protobuf (HTTP/2 и трейлеры уже проходят насквозь)
 - Потоковая передача больших тел (сейчас тело буферизуется целиком)
