@@ -70,6 +70,56 @@ check("Страница сертификата", out.contains("BEGIN CERTIFICATE
 (out, _) = curl(["http://127.0.0.1:19090/proxy.pac"])
 check("PAC файл", out.contains("FindProxyForURL"), out)
 
+// WebSocket through the proxy: URLSession tunnels via CONNECT, Snifix decrypts and relays frames
+final class TrustCA: NSObject, URLSessionDelegate {
+    let anchor: SecCertificate
+    init(_ der: Data) { anchor = SecCertificateCreateWithData(nil, der as CFData)! }
+    func urlSession(_ s: URLSession, didReceive c: URLAuthenticationChallenge,
+                    completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
+        guard let trust = c.protectionSpace.serverTrust else { return completionHandler(.performDefaultHandling, nil) }
+        SecTrustSetAnchorCertificates(trust, [anchor] as CFArray)
+        completionHandler(SecTrustEvaluateWithError(trust, nil) ? .useCredential : .cancelAuthenticationChallenge,
+                          URLCredential(trust: trust))
+    }
+}
+let config = URLSessionConfiguration.ephemeral
+config.connectionProxyDictionary = ["HTTPEnable": 1, "HTTPProxy": "127.0.0.1", "HTTPPort": 19090,
+                                    "HTTPSEnable": 1, "HTTPSProxy": "127.0.0.1", "HTTPSPort": 19090]
+let session = URLSession(configuration: config, delegate: TrustCA(ca.certificateDER), delegateQueue: nil)
+let ws = session.webSocketTask(with: URL(string: "wss://echo.websocket.org/")!)
+ws.resume()
+let wsDone = DispatchSemaphore(value: 0)
+var echoed = ""
+ws.send(.string("привет от Snifix")) { _ in }
+func receiveEcho() {
+    ws.receive { result in
+        if case .success(.string(let s)) = result, s.contains("Snifix") { echoed = s; wsDone.signal() }
+        else if case .success = result { receiveEcho() }
+        else { wsDone.signal() }
+    }
+}
+receiveEcho()
+_ = wsDone.wait(timeout: .now() + 15)
+ws.cancel(with: .normalClosure, reason: nil)
+check("WebSocket через прокси", echoed == "привет от Snifix", echoed)
+Thread.sleep(forTimeInterval: 0.5)
+let wsFlow = sink.lock.withLock { sink.flows.values.first { $0.isWebSocket } }
+check("WebSocket сообщения записаны", (wsFlow?.webSocketMessages.count ?? 0) >= 2, "\(wsFlow?.webSocketMessages.count ?? -1)")
+
+// A client that rejects the Snifix certificate (like an app with pinning)
+func curlNoCA(_ url: String) -> Int32 {
+    let p = Process()
+    p.executableURL = URL(fileURLWithPath: "/usr/bin/curl")
+    p.arguments = ["-s", "-o", "/dev/null", "--max-time", "20", "--proxy", "http://127.0.0.1:19090", url]
+    try? p.run(); p.waitUntilExit()
+    return p.terminationStatus
+}
+check("Пиннинг: первый запрос отклонён клиентом", curlNoCA("https://www.wikipedia.org/") != 0)
+Thread.sleep(forTimeInterval: 0.3)
+check("Пиннинг: хост пропускается без расшифровки", curlNoCA("https://www.wikipedia.org/") == 0)
+check("Пиннинг: ошибка записана", sink.lock.withLock { sink.flows.values.contains { f in
+    if case .failed(let m) = f.state { return f.request.host == "www.wikipedia.org" && m.contains("пиннинг") }; return false } })
+
 engine.rules.sslBypass = ["example.com"]
 (out, code) = curl(["https://example.com/mock/profile"])
 check("Туннель без расшифровки", code != 0 || !out.contains("Snifix"), out)

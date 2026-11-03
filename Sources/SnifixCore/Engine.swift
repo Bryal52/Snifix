@@ -61,6 +61,7 @@ public final class ProxyEngine: @unchecked Sendable {
     public let sink: FlowSink
     public let scripts = ScriptRunner()
     private let group = MultiThreadedEventLoopGroup(numberOfThreads: max(2, System.coreCount / 2))
+    var loopGroup: EventLoopGroup { group }
     private var serverChannel: Channel?
     private let state: NIOLockedValueBox<(rules: RulesDocument, settings: ProxySettings, recording: Bool)>
     private let nextID = NIOLockedValueBox(1)

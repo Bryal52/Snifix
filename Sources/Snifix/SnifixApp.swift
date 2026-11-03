@@ -1,0 +1,188 @@
+import SwiftUI
+import AppKit
+import SnifixCore
+import UniformTypeIdentifiers
+
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.appearance = NSAppearance(named: .darkAqua)
+        scheduleSnapshot()
+        // Put the network settings back even when the app is killed from Terminal or Activity Monitor
+        for sig in [SIGTERM, SIGINT, SIGHUP] {
+            signal(sig, SIG_IGN)
+            let source = DispatchSource.makeSignalSource(signal: sig, queue: .main)
+            source.setEventHandler {
+                MainActor.assumeIsolated { AppModel.shared.shutdown() }
+                exit(0)
+            }
+            source.resume()
+            signalSources.append(source)
+        }
+    }
+
+    private var signalSources: [DispatchSourceSignal] = []
+
+    /// SNIFIX_SNAPSHOT=/path/dir saves PNGs of the open windows after SNIFIX_SNAPSHOT_DELAY seconds (for checking the UI).
+    private func scheduleSnapshot() {
+        let env = ProcessInfo.processInfo.environment
+        guard let dir = env["SNIFIX_SNAPSHOT"] else { return }
+        let delay = Double(env["SNIFIX_SNAPSHOT_DELAY"] ?? "6") ?? 6
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+            MainActor.assumeIsolated {
+                let model = AppModel.shared
+                if let last = model.visibleRows.first(where: { $0.method == "POST" }) ?? model.visibleRows.first {
+                    model.selection = [last.id]
+                }
+                if let rule = model.rules.rules.first { RulesState.shared.tool = RulesTool(kind: rule.kind); RulesState.shared.selectedRule = rule.id }
+                for id in (env["SNIFIX_SNAPSHOT_WINDOWS"] ?? "").split(separator: ",") {
+                    BreakpointWindowOpener.openWindow?(String(id))
+                }
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                for (i, w) in NSApp.windows.enumerated() where w.isVisible {
+                    guard let view = w.contentView?.superview ?? w.contentView,
+                          let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { continue }
+                    view.cacheDisplay(in: view.bounds, to: rep)
+                    let name = w.title.isEmpty ? "window\(i)" : w.title
+                    try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: dir).appendingPathComponent("\(name).png"))
+                }
+                if env["SNIFIX_SNAPSHOT_QUIT"] != nil { NSApp.terminate(nil) }
+            }
+        }
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        MainActor.assumeIsolated { AppModel.shared.shutdown() }
+    }
+
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+}
+
+@main
+struct SnifixApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
+    @UIState private var model = AppModel.shared
+
+    var body: some Scene {
+        WindowGroup("Snifix", id: "main") {
+            MainView()
+                .environment(model)
+                .frame(minWidth: 980, minHeight: 600)
+                .tint(Theme.gold)
+        }
+        .defaultSize(width: 1400, height: 860)
+        .commands { SnifixCommands(model: model) }
+
+        Window("Правила", id: "rules") {
+            RulesView().environment(model).tint(Theme.gold)
+        }
+        .defaultSize(width: 1100, height: 700)
+
+        Window("Точки останова", id: "breakpoints") {
+            BreakpointsView().environment(model).tint(Theme.gold)
+        }
+        .defaultSize(width: 900, height: 620)
+
+        Window("Новый запрос", id: "compose") {
+            ComposeView().environment(model).tint(Theme.gold)
+        }
+        .defaultSize(width: 760, height: 560)
+
+        Window("Устройства", id: "devices") {
+            DevicesView().environment(model).tint(Theme.gold)
+        }
+        .defaultSize(width: 680, height: 700)
+
+        Settings {
+            SettingsView().environment(model).tint(Theme.gold)
+        }
+    }
+}
+
+struct SnifixCommands: Commands {
+    let model: AppModel
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some Commands {
+        CommandGroup(replacing: .newItem) {
+            Button("Новый запрос") { ComposeState.shared.template = nil; openWindow(id: "compose") }
+                .keyboardShortcut("n")
+            Divider()
+            Button("Открыть сессию…") {
+                let panel = NSOpenPanel()
+                panel.allowedContentTypes = [UTType(filenameExtension: "snifix") ?? .json, .json]
+                if panel.runModal() == .OK, let url = panel.url { model.openSession(url) }
+            }
+            .keyboardShortcut("o")
+            Button("Сохранить сессию…") {
+                let panel = NSSavePanel()
+                panel.nameFieldStringValue = "Сессия.snifix"
+                if panel.runModal() == .OK, let url = panel.url {
+                    let list = model.rows.compactMap { model.flows[$0.id] }
+                    model.saveSession(to: url, flows: list)
+                    model.showToast("Сессия сохранена: \(list.count) запросов")
+                }
+            }
+            .keyboardShortcut("s")
+            Button("Экспорт всех в HAR…") {
+                let panel = NSSavePanel()
+                panel.nameFieldStringValue = "Snifix.har"
+                if panel.runModal() == .OK, let url = panel.url {
+                    try? Export.har(model.rows.compactMap { model.flows[$0.id] }).write(to: url)
+                }
+            }
+        }
+        CommandMenu("Прокси") {
+            Button(model.recording ? "Остановить запись" : "Начать запись") { model.recording.toggle() }
+                .keyboardShortcut("r")
+            Button("Очистить") { model.clear() }
+                .keyboardShortcut("k")
+            Divider()
+            Button(model.systemProxyEnabled ? "Выключить перехват Mac" : "Включить перехват Mac") {
+                model.setSystemProxy(!model.systemProxyEnabled)
+            }
+            .keyboardShortcut("p", modifiers: [.command, .shift])
+            Divider()
+            Button("Повторить выбранный") { for f in model.selectedFlows() { model.repeatRequest(f.request) } }
+                .keyboardShortcut("r", modifiers: [.command, .shift])
+            Button("Копировать как cURL") {
+                if let f = model.focusedFlow { model.copy(Export.curl(f.request), note: "cURL скопирован") }
+            }
+            .keyboardShortcut("c", modifiers: [.command, .shift])
+        }
+        CommandMenu("Инструменты") {
+            tool("Map Local", .mapLocal, "l")
+            tool("Map Remote", .mapRemote, "m")
+            tool("Rewrite", .rewrite, "w")
+            tool("Точки останова", .breakpoint, "b")
+            tool("Скрипты", .script, "i")
+            tool("Блокировка", .block, "j")
+            tool("Медленная сеть", .throttle, "t")
+            Divider()
+            tool("Исключения SSL", .sslBypass, nil)
+            tool("Allow-list", .allowList, nil)
+            tool("DNS", .dns, nil)
+            Divider()
+            Button("Остановленные запросы") { openWindow(id: "breakpoints") }
+        }
+        CommandMenu("Сертификат") {
+            Button("Установить на этот Mac…") { model.trustCertificateOnMac() }
+            Button("Подключить iPhone…") { openWindow(id: "devices") }
+            Button("Подключить Android…") { openWindow(id: "devices") }
+            Divider()
+            Button("Экспорт сертификата…") {
+                let panel = NSSavePanel()
+                panel.nameFieldStringValue = "Snifix-CA.pem"
+                if panel.runModal() == .OK, let url = panel.url { try? model.ca.certificatePEM.write(to: url, atomically: true, encoding: .utf8) }
+            }
+        }
+    }
+
+    private func tool(_ title: String, _ t: RulesTool, _ key: Character?) -> some View {
+        Button(title) {
+            RulesState.shared.tool = t
+            openWindow(id: "rules")
+        }
+        .keyboardShortcut(key.map { KeyEquivalent($0) } ?? KeyEquivalent("\0"), modifiers: key == nil ? [] : [.command, .option])
+    }
+}
