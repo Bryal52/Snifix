@@ -1,4 +1,5 @@
 import Foundation
+import NIOHTTP1
 
 public struct HTTPHeader: Codable, Hashable, Sendable {
     public var name: String
@@ -74,8 +75,15 @@ public struct ResponseData: Sendable, Codable {
 
     public init(statusCode: Int, reason: String? = nil, headers: [HTTPHeader], body: Data) {
         self.statusCode = statusCode
-        self.reason = reason ?? HTTPURLResponse.localizedString(forStatusCode: statusCode).capitalized
+        self.reason = reason ?? ResponseData.standardReason(statusCode)
         self.headers = headers; self.body = body
+    }
+}
+
+extension ResponseData {
+    /// "OK", "Not Found"… as servers send them.
+    public static func standardReason(_ code: Int) -> String {
+        HTTPResponseStatus(statusCode: code).reasonPhrase
     }
 }
 

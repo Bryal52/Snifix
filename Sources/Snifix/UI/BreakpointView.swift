@@ -45,7 +45,7 @@ struct EditableMessage {
         var r = response
         if statusCode != r.statusCode {
             r.statusCode = statusCode
-            r.reason = HTTPURLResponse.localizedString(forStatusCode: statusCode).capitalized
+            r.reason = ResponseData.standardReason(statusCode)
         }
         r.headers = headers
         if bodyEdited { r.body = Data(body.utf8); r.headers.remove("Content-Encoding") }

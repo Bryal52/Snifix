@@ -58,7 +58,7 @@ public actor ScriptRunner {
         var r = response
         if let code = dict["statusCode"] as? NSNumber, code.intValue != response.statusCode {
             r.statusCode = code.intValue
-            r.reason = HTTPURLResponse.localizedString(forStatusCode: code.intValue).capitalized
+            r.reason = ResponseData.standardReason(code.intValue)
         }
         if let h = dict["headers"] as? [String: Any] { r.headers = Self.headers(h, keepingOrderOf: response.headers) }
         if let b = Self.body(dict["body"], original: res["body"]) { r.body = b; r.headers.remove("Content-Encoding") }

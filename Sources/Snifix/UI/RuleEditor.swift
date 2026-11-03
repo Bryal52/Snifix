@@ -169,7 +169,7 @@ struct MapLocalFields: View {
                     .textFieldStyle(.roundedBorder).frame(width: 70)
                 Menu("Шаблон") {
                     ForEach([200, 201, 204, 301, 400, 401, 403, 404, 409, 422, 429, 500, 502, 503], id: \.self) { code in
-                        Button("\(code) \(HTTPURLResponse.localizedString(forStatusCode: code))") { rule.mapLocal.statusCode = code }
+                        Button("\(code) \(ResponseData.standardReason(code))") { rule.mapLocal.statusCode = code }
                     }
                 }
                 .fixedSize()

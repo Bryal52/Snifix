@@ -212,10 +212,10 @@ struct StatusBar: View {
 
 // MARK: - Sidebar
 
+/// Proxyman-style tree: device → its apps → their domains, plus the device's domains.
 struct SidebarView: View {
     @Environment(AppModel.self) private var model
-    @UIState private var hostsExpanded = true
-    @UIState private var appsExpanded = true
+    @AppStorage("sidebarExpanded") private var expandedRaw = "Mac|Mac/apps"
 
     var body: some View {
         @Bindable var model = model
@@ -230,65 +230,147 @@ struct SidebarView: View {
                 Section("Закреплённые") {
                     ForEach(model.pinnedApps, id: \.self) { a in
                         row(a, "app.badge", nil).tag(SidebarItem.app(a))
-                            .contextMenu { Button("Открепить") { model.pinnedApps.removeAll { $0 == a } } }
+                            .contextMenu { Button("Открепить") { withAnimation { model.pinnedApps.removeAll { $0 == a } } } }
                     }
                     ForEach(model.pinnedHosts, id: \.self) { h in
                         row(h, "globe", nil).tag(SidebarItem.host(h))
-                            .contextMenu { Button("Открепить") { model.pinnedHosts.removeAll { $0 == h } } }
+                            .contextMenu { Button("Открепить") { withAnimation { model.pinnedHosts.removeAll { $0 == h } } } }
                     }
                 }
             }
-            if !model.devices.isEmpty {
-                Section("Устройства") {
-                    ForEach(model.devices, id: \.0) { d in
-                        row(d.0, deviceSymbol(d.0), d.1).tag(SidebarItem.device(d.0))
+            Section {
+                if model.deviceTree.isEmpty {
+                    Text("Пока нет запросов").font(.system(size: 11.5)).foregroundStyle(.tertiary)
+                }
+                ForEach(model.deviceTree) { device in
+                    DisclosureGroup(isExpanded: expanded(device.key)) {
+                        DisclosureGroup(isExpanded: expanded(device.key + "/apps")) {
+                            ForEach(device.apps) { app in appRow(device, app) }
+                        } label: {
+                            groupLabel("Приложения", "square.grid.2x2", device.apps.count)
+                        }
+                        DisclosureGroup(isExpanded: expanded(device.key + "/hosts")) {
+                            ForEach(device.hosts) { h in hostRow(h, tag: .deviceHost(device.key, h.name)) }
+                        } label: {
+                            groupLabel("Домены", "globe", device.hosts.count)
+                        }
+                    } label: {
+                        deviceRow(device).tag(SidebarItem.device(device.key))
                     }
                 }
-            }
-            Section("Приложения", isExpanded: $appsExpanded) {
-                ForEach(model.apps, id: \.0) { a in
-                    row(a.0, "app.dashed", a.1).tag(SidebarItem.app(a.0))
-                        .contextMenu {
-                            Button(model.pinnedApps.contains(a.0) ? "Открепить" : "Закрепить") { togglePin(app: a.0) }
+            } header: {
+                HStack {
+                    Text("Устройства")
+                    Spacer()
+                    Menu {
+                        Picker("Сортировка", selection: $model.sidebarSort) {
+                            ForEach(SidebarSort.allCases) { Text($0.rawValue).tag($0) }
                         }
-                }
-            }
-            Section("Домены", isExpanded: $hostsExpanded) {
-                ForEach(model.hosts, id: \.0) { h in
-                    row(h.0, "globe", h.1).tag(SidebarItem.host(h.0))
-                        .contextMenu {
-                            Button(model.pinnedHosts.contains(h.0) ? "Открепить" : "Закрепить") { togglePin(host: h.0) }
-                            Button("Не расшифровывать HTTPS") {
-                                if !model.rules.sslBypass.contains(h.0) { model.rules.sslBypass.append(h.0) }
-                                model.showToast("\(h.0) добавлен в исключения SSL")
-                            }
-                            Button("Копировать") { model.copy(h.0) }
-                        }
+                        .pickerStyle(.inline)
+                        Divider()
+                        Button("Развернуть всё") { expandAll(true) }
+                        Button("Свернуть всё") { expandAll(false) }
+                    } label: {
+                        Image(systemName: "line.3.horizontal.decrease.circle")
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    .help("Сортировка: \(model.sidebarSort.rawValue)")
                 }
             }
         }
         .listStyle(.sidebar)
-        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: model.hosts.map(\.0))
+        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: model.deviceTree.map(\.key))
+        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: model.sidebarSort)
+        .animation(.easeInOut(duration: 0.25), value: expandedRaw)
     }
 
-    private func togglePin(host: String) {
-        withAnimation {
-            if model.pinnedHosts.contains(host) { model.pinnedHosts.removeAll { $0 == host } } else { model.pinnedHosts.append(host) }
+    private func deviceRow(_ d: SidebarDevice) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: d.symbol)
+                .font(.system(size: 14))
+                .foregroundStyle(Theme.goldGradient)
+                .frame(width: 18)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(d.name).font(.system(size: 12.5, weight: .semibold)).lineLimit(1)
+                if !d.detail.isEmpty {
+                    Text(d.detail).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
+                }
+            }
+            Spacer()
+            if model.iPhonesOnUSB.isEmpty == false && d.symbol == "iphone" {
+                Image(systemName: "cable.connector").font(.system(size: 9)).foregroundStyle(Theme.gold)
+            }
+            countBadge(d.count)
+        }
+        .contextMenu {
+            Button("Показать только это устройство") { model.sidebar = .device(d.key) }
+            Button("Развернуть") { setExpanded(d.key, true); setExpanded(d.key + "/apps", true) }
         }
     }
 
-    private func togglePin(app: String) {
-        withAnimation {
-            if model.pinnedApps.contains(app) { model.pinnedApps.removeAll { $0 == app } } else { model.pinnedApps.append(app) }
+    private func appRow(_ d: SidebarDevice, _ app: SidebarApp) -> some View {
+        DisclosureGroup(isExpanded: expanded(d.key + "/app/" + app.name)) {
+            ForEach(app.hosts) { h in hostRow(h, tag: .deviceAppHost(d.key, app.name, h.name)) }
+        } label: {
+            HStack {
+                Label { Text(app.name).lineLimit(1).truncationMode(.middle) } icon: {
+                    Image(systemName: "app.dashed").foregroundStyle(Theme.gold)
+                }
+                Spacer()
+                countBadge(app.count)
+            }
+            .tag(SidebarItem.deviceApp(d.key, app.name))
+            .contextMenu {
+                Button(model.pinnedApps.contains(app.name) ? "Открепить" : "Закрепить") {
+                    withAnimation {
+                        if model.pinnedApps.contains(app.name) { model.pinnedApps.removeAll { $0 == app.name } }
+                        else { model.pinnedApps.append(app.name) }
+                    }
+                }
+            }
         }
     }
 
-    private func deviceSymbol(_ name: String) -> String {
-        if name == "Mac" { return "macbook" }
-        if name.contains("iPhone") { return "iphone" }
-        if name.contains("iPad") { return "ipad" }
-        if name.contains("Android") { return "candybarphone" }
-        return "network"
+    private func hostRow(_ h: SidebarLeaf, tag: SidebarItem) -> some View {
+        HStack {
+            Label { Text(h.name).lineLimit(1).truncationMode(.middle) } icon: {
+                Image(systemName: "globe").foregroundStyle(Theme.gold.opacity(0.8))
+            }
+            Spacer()
+            countBadge(h.count)
+        }
+        .tag(tag)
+        .contextMenu {
+            Button(model.pinnedHosts.contains(h.name) ? "Открепить" : "Закрепить") {
+                withAnimation {
+                    if model.pinnedHosts.contains(h.name) { model.pinnedHosts.removeAll { $0 == h.name } }
+                    else { model.pinnedHosts.append(h.name) }
+                }
+            }
+            Button("Не расшифровывать HTTPS") {
+                if !model.rules.sslBypass.contains(h.name) { model.rules.sslBypass.append(h.name) }
+                model.showToast("\(h.name) добавлен в исключения SSL")
+            }
+            Button("Копировать") { model.copy(h.name) }
+        }
+    }
+
+    private func groupLabel(_ title: String, _ symbol: String, _ count: Int) -> some View {
+        HStack {
+            Label(title, systemImage: symbol).font(.system(size: 11.5, weight: .medium)).foregroundStyle(.secondary)
+            Spacer()
+            Text("\(count)").font(.system(size: 10)).foregroundStyle(.tertiary).monospacedDigit()
+        }
+        .selectionDisabled()
+    }
+
+    private func countBadge(_ n: Int) -> some View {
+        Text("\(n)")
+            .font(.system(size: 10.5, weight: .medium)).monospacedDigit()
+            .foregroundStyle(.secondary)
+            .contentTransition(.numericText())
     }
 
     private func row(_ title: String, _ symbol: String, _ count: Int?) -> some View {
@@ -297,12 +379,31 @@ struct SidebarView: View {
                 Image(systemName: symbol).foregroundStyle(Theme.goldGradient)
             }
             Spacer()
-            if let count {
-                Text("\(count)").font(.system(size: 10.5, weight: .medium)).monospacedDigit()
-                    .foregroundStyle(.secondary)
-                    .contentTransition(.numericText())
-            }
+            if let count { countBadge(count) }
         }
+    }
+
+    // Expanded nodes are kept between launches
+    private var expandedSet: Set<String> { Set(expandedRaw.split(separator: "|").map(String.init)) }
+
+    private func expanded(_ key: String) -> Binding<Bool> {
+        Binding(get: { expandedSet.contains(key) }, set: { setExpanded(key, $0) })
+    }
+
+    private func setExpanded(_ key: String, _ on: Bool) {
+        var set = expandedSet
+        if on { set.insert(key) } else { set.remove(key) }
+        expandedRaw = set.sorted().joined(separator: "|")
+    }
+
+    private func expandAll(_ on: Bool) {
+        if !on { expandedRaw = ""; return }
+        var set = expandedSet
+        for d in model.deviceTree {
+            set.insert(d.key); set.insert(d.key + "/apps")
+            for a in d.apps { set.insert(d.key + "/app/" + a.name) }
+        }
+        expandedRaw = set.sorted().joined(separator: "|")
     }
 }
 

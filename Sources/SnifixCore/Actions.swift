@@ -20,7 +20,10 @@ enum MapLocal {
             body = (try? Data(contentsOf: url)) ?? Data()
             headers.set("Content-Type", BodyCodec.mimeType(forExtension: url.pathExtension))
         }
-        return ResponseData(statusCode: action.statusCode, headers: headers, body: body)
+        var response = ResponseData(statusCode: action.statusCode, headers: headers, body: body)
+        // Answered by Snifix itself: same protocol as the client, no server in between
+        response.version = request.version
+        return response
     }
 
     /// Part of the request path after the static prefix of the pattern (up to its first `*`).
@@ -126,7 +129,7 @@ enum Rewriter {
             case .setStatus:
                 guard let code = Int(step.value.trimmingCharacters(in: .whitespaces)) else { continue }
                 response.statusCode = code
-                response.reason = HTTPURLResponse.localizedString(forStatusCode: code).capitalized
+                response.reason = ResponseData.standardReason(code)
             case .setQuery, .removeQuery, .replaceURL:
                 continue
             }

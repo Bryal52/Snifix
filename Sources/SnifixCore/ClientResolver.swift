@@ -11,6 +11,12 @@ public enum ClientResolver {
         var info = ClientInfo(address: address, port: port, isLocal: isLocal)
         if isLocal, let pid = pid(forLocalPort: port, remotePort: channel.localAddress?.port ?? 0) {
             let path = executablePath(pid)
+            if path.map({ ($0 as NSString).lastPathComponent == "adb" }) ?? false {
+                info.isLocal = false
+                info.address = "USB"
+                info.deviceName = "Android"
+                return info
+            }
             info.bundlePath = path.flatMap(outermostBundle)
             info.appName = info.bundlePath.map { ($0 as NSString).lastPathComponent.replacingOccurrences(of: ".app", with: "") }
                 ?? path.map { ($0 as NSString).lastPathComponent }

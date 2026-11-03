@@ -14,6 +14,8 @@ struct FlowRow: Identifiable, Hashable {
     var statusText: String
     var appName: String
     var deviceName: String
+    /// Groups the requests of one device: "Mac", the phone's IP, or "USB" for Android through adb.
+    var deviceKey: String
     var startedAt: Date
     var duration: Double
     var requestSize: Int
@@ -45,7 +47,8 @@ struct FlowRow: Identifiable, Hashable {
         isSSL = f.isSSL
         category = ContentCategory.of(request: f.request, response: f.response)
         appName = f.client.appName ?? f.client.address
-        deviceName = f.client.deviceName ?? (f.client.isLocal ? "Mac" : f.client.address)
+        deviceName = f.client.deviceName ?? (f.client.isLocal ? "Mac" : "Устройство")
+        deviceKey = f.client.isLocal ? "Mac" : f.client.address
         isWebSocket = f.isWebSocket
         ruleNames = f.matchedRules.joined(separator: ", ")
         let short = { (v: String) in v.hasPrefix("HTTP/2") ? "h2" : "h1" }
@@ -66,7 +69,44 @@ struct FlowRow: Identifiable, Hashable {
 }
 
 enum SidebarItem: Hashable {
-    case all, pinned, device(String), app(String), host(String)
+    case all, pinned
+    case device(String)
+    case deviceApp(String, String)
+    case deviceHost(String, String)
+    case deviceAppHost(String, String, String)
+    case app(String), host(String)
+}
+
+enum SidebarSort: String, CaseIterable, Identifiable {
+    case name = "По имени", count = "По количеству", recent = "По активности"
+    var id: String { rawValue }
+}
+
+struct SidebarLeaf: Identifiable, Hashable {
+    var id: String { name }
+    var name: String
+    var count: Int
+    var last: Date
+}
+
+struct SidebarApp: Identifiable, Hashable {
+    var id: String { name }
+    var name: String
+    var count: Int
+    var last: Date
+    var hosts: [SidebarLeaf]
+}
+
+struct SidebarDevice: Identifiable, Hashable {
+    var id: String { key }
+    var key: String
+    var name: String
+    var detail: String
+    var symbol: String
+    var count: Int
+    var last: Date
+    var apps: [SidebarApp]
+    var hosts: [SidebarLeaf]
 }
 
 enum CategoryFilter: String, CaseIterable, Identifiable {
@@ -174,9 +214,10 @@ final class AppModel {
     var pinnedApps: [String] = [] { didSet { savePins(); refreshVisible() } }
 
     // Sidebar summaries
-    private(set) var hosts: [(String, Int)] = []
-    private(set) var apps: [(String, Int)] = []
-    private(set) var devices: [(String, Int)] = []
+    private(set) var deviceTree: [SidebarDevice] = []
+    var sidebarSort: SidebarSort = SidebarSort(rawValue: UserDefaults.standard.string(forKey: "sidebarSort") ?? "") ?? .name {
+        didSet { UserDefaults.standard.set(sidebarSort.rawValue, forKey: "sidebarSort"); rebuildSummaries() }
+    }
 
     var settings: ProxySettings { didSet { engine.settings = settings; save(settings, "settings.json"); updatePAC() } }
     private let pacFlag = Flag()
@@ -341,15 +382,77 @@ final class AppModel {
     }
 
     private func rebuildSummaries() {
-        var h: [String: Int] = [:], a: [String: Int] = [:], d: [String: Int] = [:]
+        struct Acc { var count = 0; var last = Date.distantPast; var names: [String: Int] = [:]
+            var apps: [String: (Int, Date, [String: (Int, Date)])] = [:]; var hosts: [String: (Int, Date)] = [:] }
+        var acc: [String: Acc] = [:]
         for r in rows {
-            h[r.host, default: 0] += 1
-            a[r.appName, default: 0] += 1
-            d[r.deviceName, default: 0] += 1
+            var d = acc[r.deviceKey] ?? Acc()
+            d.count += 1
+            d.last = max(d.last, r.startedAt)
+            d.names[r.deviceName, default: 0] += 1
+            var app = d.apps[r.appName] ?? (0, .distantPast, [:])
+            app.0 += 1
+            app.1 = max(app.1, r.startedAt)
+            let ah = app.2[r.host] ?? (0, .distantPast)
+            app.2[r.host] = (ah.0 + 1, max(ah.1, r.startedAt))
+            d.apps[r.appName] = app
+            let h = d.hosts[r.host] ?? (0, .distantPast)
+            d.hosts[r.host] = (h.0 + 1, max(h.1, r.startedAt))
+            acc[r.deviceKey] = d
         }
-        hosts = h.sorted { $0.key < $1.key }
-        apps = a.sorted { $0.key.localizedCaseInsensitiveCompare($1.key) == .orderedAscending }
-        devices = d.sorted { $0.key < $1.key }
+        let leaves = { (m: [String: (Int, Date)]) in self.sorted(m.map { SidebarLeaf(name: $0.key, count: $0.value.0, last: $0.value.1) }) }
+        var tree: [SidebarDevice] = acc.map { key, d in
+            // Name devices by what most of their requests say (User-Agent), plus the address
+            let name = d.names.filter { $0.key != "Устройство" }.max { $0.value < $1.value }?.key ?? d.names.keys.first ?? "Устройство"
+            let android = androidDevices.filter(\.proxied)
+            let label: String
+            let detail: String
+            if key == "Mac" { label = "Этот Mac"; detail = "" }
+            else if key == "USB" { label = android.count == 1 ? android[0].model : "Android"; detail = "USB" }
+            else { label = name == "Mac" ? "Mac" : name; detail = key }
+            let apps = d.apps.map { SidebarApp(name: $0.key, count: $0.value.0, last: $0.value.1, hosts: leaves($0.value.2)) }
+            return SidebarDevice(key: key, name: label, detail: detail, symbol: Self.deviceSymbol(key: key, name: name),
+                                 count: d.count, last: d.last, apps: sortedApps(apps), hosts: leaves(d.hosts))
+        }
+        // The Mac stays on top, like the local machine in Proxyman
+        tree.sort { a, b in
+            if (a.key == "Mac") != (b.key == "Mac") { return a.key == "Mac" }
+            switch sidebarSort {
+            case .name: return a.name.localizedStandardCompare(b.name) == .orderedAscending
+            case .count: return a.count > b.count
+            case .recent: return a.last > b.last
+            }
+        }
+        deviceTree = tree
+    }
+
+    private func sorted(_ list: [SidebarLeaf]) -> [SidebarLeaf] {
+        switch sidebarSort {
+        case .name: return list.sorted { Self.hostSortKey($0.name) < Self.hostSortKey($1.name) }
+        case .count: return list.sorted { $0.count != $1.count ? $0.count > $1.count : $0.name < $1.name }
+        case .recent: return list.sorted { $0.last > $1.last }
+        }
+    }
+
+    private func sortedApps(_ list: [SidebarApp]) -> [SidebarApp] {
+        switch sidebarSort {
+        case .name: return list.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        case .count: return list.sorted { $0.count != $1.count ? $0.count > $1.count : $0.name < $1.name }
+        case .recent: return list.sorted { $0.last > $1.last }
+        }
+    }
+
+    /// Hosts of one site stay together: "api.octo.uz" sorts as "octo.uz.api".
+    private static func hostSortKey(_ host: String) -> String {
+        host.lowercased().split(separator: ".").reversed().joined(separator: ".")
+    }
+
+    static func deviceSymbol(key: String, name: String) -> String {
+        if key == "Mac" { return "macbook" }
+        if key == "USB" || name.contains("Android") { return "candybarphone" }
+        if name.contains("iPad") { return "ipad" }
+        if name.contains("iPhone") { return "iphone" }
+        return "network"
     }
 
     func refreshVisible() {
@@ -358,7 +461,10 @@ final class AppModel {
             switch sidebar ?? .all {
             case .all: break
             case .pinned: if !pinnedHosts.contains(r.host) && !pinnedApps.contains(r.appName) { return false }
-            case .device(let d): if r.deviceName != d { return false }
+            case .device(let d): if r.deviceKey != d { return false }
+            case .deviceApp(let d, let a): if r.deviceKey != d || r.appName != a { return false }
+            case .deviceHost(let d, let h): if r.deviceKey != d || r.host != h { return false }
+            case .deviceAppHost(let d, let a, let h): if r.deviceKey != d || r.appName != a || r.host != h { return false }
             case .app(let a): if r.appName != a { return false }
             case .host(let h): if r.host != h { return false }
             }
