@@ -140,7 +140,7 @@ struct IPhoneCard: View {
                     CopyField(text: model.pacURL)
                     StepRow(number: 3, text: "Наведите камеру на QR-код и скачайте сертификат (или откройте **http://snifix.cert** в Safari).")
                     StepRow(number: 4, text: "Настройки → Основные → **VPN и управление устройством** → Snifix CA → Установить.")
-                    StepRow(number: 5, text: "Основные → Об этом устройстве → **Доверие сертификатам** → включить Snifix CA.")
+                    StepRow(number: 5, text: "Основные → Об этом устройстве → **Доверие сертификатам** → включить Snifix CA. Без этого шага HTTPS не расшифруется. Надпись «Не проверено» у профиля — это нормально.")
                 }
             }
             Divider()

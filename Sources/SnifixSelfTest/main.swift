@@ -125,18 +125,27 @@ let wsFlow = sink.lock.withLock { sink.flows.values.first { $0.isWebSocket } }
 check("WebSocket сообщения записаны", (wsFlow?.webSocketMessages.count ?? 0) >= 2, "\(wsFlow?.webSocketMessages.count ?? -1)")
 
 // A client that rejects the Snifix certificate (like an app with pinning)
-func curlNoCA(_ url: String) -> Int32 {
+func curlNoCA(_ url: String, proxy: String = "127.0.0.1") -> Int32 {
     let p = Process()
     p.executableURL = URL(fileURLWithPath: "/usr/bin/curl")
-    p.arguments = ["-s", "-o", "/dev/null", "--max-time", "20", "--proxy", "http://127.0.0.1:19090", url]
+    p.arguments = ["-s", "-o", "/dev/null", "--max-time", "20", "--proxy", "http://\(proxy):19090", url]
     try? p.run(); p.waitUntilExit()
     return p.terminationStatus
 }
 check("Пиннинг: первый запрос отклонён клиентом", curlNoCA("https://www.wikipedia.org/") != 0)
 Thread.sleep(forTimeInterval: 0.3)
 check("Пиннинг: хост пропускается без расшифровки", curlNoCA("https://www.wikipedia.org/") == 0)
+// A new device (other address) that has not trusted the CA: every host fails
+let lan = NetworkInfo.primaryAddress() ?? "127.0.0.1"
+_ = curlNoCA("https://www.example.org/", proxy: lan)
+_ = curlNoCA("https://www.wikipedia.org/", proxy: lan)
+Thread.sleep(forTimeInterval: 0.3)
+check("Недоверенный сертификат распознан", sink.lock.withLock { sink.flows.values.contains { f in
+    if case .failed(let m) = f.state { return m.contains("не доверяет") }; return false } })
+engine.clearAutoBypass(client: "127.0.0.1")
+check("После сброса хост снова расшифровывается", curlNoCA("https://www.wikipedia.org/") != 0)
 check("Пиннинг: ошибка записана", sink.lock.withLock { sink.flows.values.contains { f in
-    if case .failed(let m) = f.state { return f.request.host == "www.wikipedia.org" && m.contains("пиннинг") }; return false } })
+    if case .failed(let m) = f.state { return f.request.host == "www.wikipedia.org" && (m.contains("пиннинг") || m.contains("не доверен")) }; return false } })
 
 engine.rules.sslBypass = ["example.com"]
 (out, code) = curl(["https://example.com/mock/profile"])

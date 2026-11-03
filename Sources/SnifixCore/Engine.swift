@@ -68,7 +68,7 @@ public final class ProxyEngine: @unchecked Sendable {
     private var serverChannel: Channel?
     private let state: NIOLockedValueBox<(rules: RulesDocument, settings: ProxySettings, recording: Bool)>
     private let nextID = NIOLockedValueBox(1)
-    private let bypassed = NIOLockedValueBox<Set<String>>([])
+    private let trust = NIOLockedValueBox(TrustState())
     private let tlsClientContexts = NIOLockedValueBox<[String: NIOSSLContext]>([:])
 
     public var breakpointHandler: (@Sendable (BreakpointEvent) async -> BreakpointDecision)?
@@ -93,8 +93,27 @@ public final class ProxyEngine: @unchecked Sendable {
         get { state.withLockedValue { $0.recording } }
         set { state.withLockedValue { $0.recording = newValue } }
     }
-    public var autoBypassedHosts: [String] { bypassed.withLockedValue { Array($0).sorted() } }
-    public func clearAutoBypass() { bypassed.withLockedValue { $0.removeAll() } }
+    public var autoBypassedHosts: [String] {
+        trust.withLockedValue { t in t.bypass.filter { $0.value > Date() }.keys.map { k in
+            let p = k.split(separator: "|", maxSplits: 1); return "\(p[1]) (\(p[0]))"
+        }.sorted() }
+    }
+    /// Forgets skipped hosts (of one device or all) so they are decrypted again.
+    public func clearAutoBypass(client: String? = nil) {
+        trust.withLockedValue { t in
+            if let client {
+                t.bypass = t.bypass.filter { !$0.key.hasPrefix(client + "|") }
+                t.rejected[client] = nil
+            } else {
+                t.bypass.removeAll()
+                t.rejected.removeAll()
+            }
+        }
+    }
+    /// Called with a device address when it refuses the certificate for every host it tries.
+    public var onUntrustedClient: (@Sendable (_ address: String, _ deviceHint: String?) -> Void)?
+    /// Called when a device that refused the certificate before now accepts it.
+    public var onTrustedClient: (@Sendable (_ address: String) -> Void)?
 
     public var port: Int { settings.port }
     public var isRunning: Bool { serverChannel?.isActive ?? false }
@@ -121,12 +140,18 @@ public final class ProxyEngine: @unchecked Sendable {
 
     // MARK: - Decisions used by the pipeline
 
-    func shouldDecrypt(host: String) -> Bool {
+    func shouldDecrypt(host: String, client: String) -> Bool {
         let (rules, settings, _) = state.withLockedValue { $0 }
         guard settings.decryptHTTPS else { return false }
         if hostMatches(host, rules.sslBypass) { return false }
         if rules.allowListEnabled && !hostMatches(host, rules.allowList) { return false }
-        return !bypassed.withLockedValue { $0.contains(host.lowercased()) }
+        let key = client + "|" + host.lowercased()
+        return trust.withLockedValue { t in
+            guard let until = t.bypass[key] else { return true }
+            if until > Date() { return false }
+            t.bypass[key] = nil
+            return true
+        }
     }
 
     func shouldRecord(host: String) -> Bool {
@@ -135,9 +160,35 @@ public final class ProxyEngine: @unchecked Sendable {
         return !rules.allowListEnabled || hostMatches(host, rules.allowList)
     }
 
-    func markPinned(host: String) {
-        guard settings.autoBypassPinned else { return }
-        bypassed.withLockedValue { _ = $0.insert(host.lowercased()) }
+    /// A client refused the certificate for `host`. Returns true when the device seems not to trust
+    /// the Snifix CA at all (several hosts refused, none accepted) rather than pinning one host.
+    func markRejected(host: String, client: ClientInfo) -> (neverAccepted: Bool, hosts: Int) {
+        let address = client.address
+        let untrusted: Bool = trust.withLockedValue { t in
+            t.rejected[address, default: []].insert(host.lowercased())
+            let never = !t.accepted.contains(address)
+            if settings.autoBypassPinned {
+                // A device that trusts nothing is retried sooner, so turning trust on takes effect quickly
+                t.bypass[address + "|" + host.lowercased()] = Date().addingTimeInterval(never ? 60 : 30 * 60)
+            }
+            let alert = never && t.rejected[address]!.count >= 2 && !t.alerted.contains(address)
+            if alert { t.alerted.insert(address) }
+            return alert
+        }
+        if untrusted { onUntrustedClient?(address, client.deviceName) }
+        return trust.withLockedValue { (!$0.accepted.contains(address), $0.rejected[address]?.count ?? 0) }
+    }
+
+    /// A client completed a decrypted TLS handshake: it trusts the CA, so earlier skips were not pinning.
+    func markAccepted(client: String) {
+        let (first, hadRejections) = trust.withLockedValue { t -> (Bool, Bool) in
+            guard !t.accepted.contains(client) else { return (false, false) }
+            t.accepted.insert(client)
+            t.alerted.remove(client)
+            return (true, !(t.rejected[client]?.isEmpty ?? true))
+        }
+        if first { clearAutoBypass(client: client) }
+        if hadRejections { onTrustedClient?(client) }
     }
 
     func connectAddress(for host: String) -> String {
@@ -329,4 +380,12 @@ enum UpstreamError: Error {
         case .timeout: return "Сервер не ответил за 120 секунд"
         }
     }
+}
+
+struct TrustState {
+    /// "client|host" → until when the host is tunneled without decryption.
+    var bypass: [String: Date] = [:]
+    var rejected: [String: Set<String>] = [:]
+    var accepted: Set<String> = []
+    var alerted: Set<String> = []
 }

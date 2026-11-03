@@ -17,6 +17,10 @@ struct MainView: View {
                     ErrorBanner(text: error)
                         .transition(.move(edge: .top).combined(with: .opacity))
                 }
+                ForEach(model.untrustedDevices.sorted(by: { $0.key < $1.key }), id: \.key) { address, name in
+                    UntrustedBanner(address: address, name: name)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
                 FilterBar()
                 Divider()
                 VSplitView {
@@ -61,6 +65,45 @@ struct ErrorBanner: View {
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
         .background(Color.red.opacity(0.12))
+    }
+}
+
+/// A phone refuses the certificate for every host: almost always the trust switch on the phone is off.
+struct UntrustedBanner: View {
+    let address: String
+    let name: String
+    @Environment(AppModel.self) private var model
+    @Environment(\.openWindow) private var openWindow
+    @UIState private var glow = false
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "exclamationmark.shield.fill")
+                .font(.system(size: 22))
+                .foregroundStyle(Theme.goldGradient)
+                .scaleEffect(glow ? 1.08 : 0.95)
+                .onAppear { withAnimation(.easeInOut(duration: 1).repeatForever()) { glow = true } }
+            VStack(alignment: .leading, spacing: 4) {
+                Text("\(name) (\(address)) не доверяет сертификату Snifix — HTTPS не расшифровывается")
+                    .font(.system(size: 12.5, weight: .semibold))
+                if name == "Android" {
+                    Text("Установите сертификат как «Сертификат ЦС». Приложение должно разрешать пользовательские сертификаты (network_security_config) — попросите QA-сборку.")
+                        .font(.system(size: 11.5)).foregroundStyle(.secondary)
+                } else {
+                    Text("Надпись «Не проверено» у профиля — это нормально. Нужно ещё включить полное доверие: **Настройки → Основные → Об этом устройстве → Доверие сертификатам → Snifix CA**. Потом нажмите «Проверить снова».")
+                        .font(.system(size: 11.5)).foregroundStyle(.secondary)
+                }
+            }
+            Spacer()
+            VStack(alignment: .trailing, spacing: 6) {
+                Button("Проверить снова") { model.retryTrust(address) }
+                    .buttonStyle(.borderedProminent).tint(Theme.amber)
+                Button("Инструкция") { openWindow(id: "devices") }.buttonStyle(.borderless)
+            }
+        }
+        .padding(.horizontal, 14).padding(.vertical, 10)
+        .background(Theme.gold.opacity(0.10))
+        .overlay(alignment: .bottom) { Rectangle().fill(Theme.gold.opacity(0.35)).frame(height: 1) }
     }
 }
 

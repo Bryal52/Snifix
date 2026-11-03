@@ -182,6 +182,8 @@ final class AppModel {
     private let pacFlag = Flag()
     var rules: RulesDocument { didSet { engine.rules = rules; scheduleRulesSave() } }
 
+    /// Devices that refuse the Snifix certificate everywhere: address → "iPhone" / "Android" / nil.
+    var untrustedDevices: [String: String] = [:]
     var breakpoints: [PendingBreakpoint] = []
     var scriptLog: [String] = []
     var toast: Toast?
@@ -208,6 +210,23 @@ final class AppModel {
         }
         caTrustedOnMac = CertificateTrust.isTrusted(ca.certificateDER)
 
+        engine.onUntrustedClient = { [weak self] address, hint in
+            Task { @MainActor in
+                guard let self else { return }
+                withAnimation(.spring(response: 0.45, dampingFraction: 0.8)) {
+                    self.untrustedDevices[address] = hint ?? (address == "127.0.0.1" ? "Mac" : "Устройство")
+                }
+                NSApp.requestUserAttention(.informationalRequest)
+            }
+        }
+        engine.onTrustedClient = { [weak self] address in
+            Task { @MainActor in
+                guard let self else { return }
+                let name = self.untrustedDevices[address] ?? "Устройство"
+                withAnimation(.spring(response: 0.45, dampingFraction: 0.8)) { _ = self.untrustedDevices.removeValue(forKey: address) }
+                self.showToast("\(name) доверяет сертификату — HTTPS расшифровывается", symbol: "checkmark.seal.fill")
+            }
+        }
         let pac = pacFlag
         engine.pacEnabled = { pac.value }
         updatePAC()
@@ -513,6 +532,12 @@ final class AppModel {
 
     var certificatePageURL: String { "http://\(localAddress):\(settings.port)/" }
     var pacURL: String { "http://\(localAddress):\(settings.port)/proxy.pac" }
+
+    func retryTrust(_ address: String) {
+        engine.clearAutoBypass(client: address)
+        withAnimation(.spring(response: 0.45, dampingFraction: 0.8)) { _ = untrustedDevices.removeValue(forKey: address) }
+        showToast("Пробуем снова — откройте приложение на телефоне", symbol: "arrow.clockwise.circle.fill")
+    }
 
     // MARK: - Misc
 

@@ -104,7 +104,7 @@ public final class CertificateAuthority: @unchecked Sendable {
             signatureAlgorithm: .ecdsaWithSHA256,
             extensions: try Certificate.Extensions {
                 Critical(BasicConstraints.notCertificateAuthority)
-                Critical(KeyUsage(digitalSignature: true, keyEncipherment: true))
+                Critical(KeyUsage(digitalSignature: true))
                 try ExtendedKeyUsage([.serverAuth])
                 SubjectAlternativeNames([san])
                 AuthorityKeyIdentifier(keyIdentifier: try certificate.extensions.subjectKeyIdentifier?.keyIdentifier)

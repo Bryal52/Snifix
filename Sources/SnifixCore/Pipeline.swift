@@ -252,7 +252,7 @@ final class TunnelSniffer: ChannelInboundHandler, RemovableChannelHandler {
         decided = true
         let channel = context.channel
         let isTLS = first == 0x16
-        if isTLS && engine.shouldDecrypt(host: host) {
+        if isTLS && engine.shouldDecrypt(host: host, client: client.address) {
             do {
                 let ssl = NIOSSLServerHandler(context: try engine.ca.serverContext(for: host, http2: engine.settings.http2))
                 let observer = HandshakeObserver(engine: engine, host: host, port: port, client: client)
@@ -355,6 +355,7 @@ final class HandshakeObserver: ChannelInboundHandler, RemovableChannelHandler {
     func userInboundEventTriggered(context: ChannelHandlerContext, event: Any) {
         if let e = event as? TLSUserEvent, case .handshakeCompleted = e {
             done = true
+            engine.markAccepted(client: client.address)
             context.fireUserInboundEventTriggered(event)
             context.pipeline.removeHandler(context: context, promise: nil)
             return
@@ -375,10 +376,16 @@ final class HandshakeObserver: ChannelInboundHandler, RemovableChannelHandler {
     private func report(_ detail: String) {
         guard !done else { return }
         done = true
-        engine.markPinned(host: host)
+        let (neverAccepted, hosts) = engine.markRejected(host: host, client: client)
         let request = RequestData(method: "CONNECT", scheme: "https", host: host, port: port, path: "/", headers: [], body: Data())
         let recorder = engine.makeRecorder(request: request, client: client, isSSL: true)
-        let bypass = engine.settings.autoBypassPinned ? " Следующие соединения к этому хосту пойдут без расшифровки." : ""
-        recorder?.fail("Клиент не принял сертификат Snifix: сертификат не установлен/не доверен или приложение использует пиннинг.\(bypass)")
+        let bypass = engine.settings.autoBypassPinned ? " Пока соединения к этому хосту идут без расшифровки." : ""
+        if neverAccepted && hosts >= 2 {
+            recorder?.fail("Устройство не доверяет сертификату Snifix. На iPhone: Настройки → Основные → Об этом устройстве → Доверие сертификатам → включите Snifix CA. На Android приложение должно разрешать пользовательские сертификаты.\(bypass)")
+        } else if neverAccepted {
+            recorder?.fail("Клиент не принял сертификат Snifix: сертификат не установлен или не доверен на устройстве, либо приложение использует пиннинг.\(bypass)")
+        } else {
+            recorder?.fail("Клиент не принял сертификат Snifix, хотя другим хостам доверяет — это пиннинг сертификата в приложении.\(bypass)")
+        }
     }
 }
