@@ -197,7 +197,8 @@ final class AppModel {
         supportDirectory = ProcessInfo.processInfo.environment["SNIFIX_HOME"].map { URL(fileURLWithPath: $0) }
             ?? fm.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Snifix")
         try? fm.createDirectory(at: supportDirectory, withIntermediateDirectories: true)
-        ca = try! CertificateAuthority(directory: supportDirectory)
+        let testCopy = ProcessInfo.processInfo.environment["SNIFIX_HOME"] != nil
+        ca = try! CertificateAuthority(directory: supportDirectory, name: testCopy ? "Snifix Test CA (не для телефона)" : nil)
         let loadedSettings = Self.load(ProxySettings.self, "settings.json", in: supportDirectory) ?? ProxySettings()
         let loadedRules = Self.load(RulesDocument.self, "rules.json", in: supportDirectory) ?? RulesDocument()
         settings = loadedSettings
@@ -531,7 +532,9 @@ final class AppModel {
     }
 
     var certificatePageURL: String { "http://\(localAddress):\(settings.port)/" }
-    var pacURL: String { "http://\(localAddress):\(settings.port)/proxy.pac" }
+    /// By Bonjour name: keeps working when the Mac gets another IP address.
+    var pacURL: String { "http://\(NetworkInfo.bonjourName()):\(settings.port)/proxy.pac" }
+    var pacURLByIP: String { "http://\(localAddress):\(settings.port)/proxy.pac" }
 
     func retryTrust(_ address: String) {
         engine.clearAutoBypass(client: address)

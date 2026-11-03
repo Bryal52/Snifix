@@ -18,7 +18,8 @@ public final class CertificateAuthority: @unchecked Sendable {
     private let contexts = NIOLockedValueBox<[String: NIOSSLContext]>([:])
 
     /// Loads the CA from `directory` or creates a new one there.
-    public init(directory: URL) throws {
+    /// `name` is used only when a new CA is created; test copies pass their own so phones can tell them apart.
+    public init(directory: URL, name: String? = nil) throws {
         let certURL = directory.appendingPathComponent("snifix-ca.pem")
         let keyURL = directory.appendingPathComponent("snifix-ca-key.pem")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -33,7 +34,7 @@ public final class CertificateAuthority: @unchecked Sendable {
         } else {
             let key = P256.Signing.PrivateKey()
             let name = try DistinguishedName {
-                CommonName("Snifix CA (\(Host.current().localizedName ?? "Mac"))")
+                CommonName(name ?? "Snifix CA (\(Host.current().localizedName ?? "Mac"))")
                 OrganizationName("Snifix")
             }
             let now = Date()

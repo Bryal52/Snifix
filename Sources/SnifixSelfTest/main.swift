@@ -13,7 +13,7 @@ final class PrintSink: FlowSink, @unchecked Sendable {
 }
 
 let dir = FileManager.default.temporaryDirectory.appendingPathComponent("snifix-selftest-\(getpid())")
-let ca = try CertificateAuthority(directory: dir)
+let ca = try CertificateAuthority(directory: dir, name: "Snifix Self-Test CA")
 let caFile = dir.appendingPathComponent("snifix-ca.pem").path
 let sink = PrintSink()
 var settings = ProxySettings()

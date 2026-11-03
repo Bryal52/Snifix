@@ -1,6 +1,7 @@
 import Foundation
 import Darwin
 import NIOCore
+import SystemConfiguration
 
 public enum ClientResolver {
     static func resolve(channel: Channel) -> ClientInfo {
@@ -123,6 +124,7 @@ public enum NetworkInfo {
 
     /// Bonjour name such as "MacBook-Pro.local", which phones resolve even when the IP changes.
     public static func bonjourName() -> String {
+        if let local = SCDynamicStoreCopyLocalHostName(nil) as String? { return local + ".local" }
         let name = ProcessInfo.processInfo.hostName
         if name.hasSuffix(".local") { return name }
         let short = name.split(separator: ".").first.map(String.init) ?? name

@@ -138,6 +138,8 @@ struct IPhoneCard: View {
                     StepRow(number: 1, text: "iPhone и Mac в одной Wi-Fi сети.")
                     StepRow(number: 2, text: "Wi-Fi → (i) → **Прокси → Авто**, адрес:")
                     CopyField(text: model.pacURL)
+                    Text("Работает и при смене IP Mac. Если не подключается — адрес по IP: \(model.pacURLByIP)")
+                        .font(.system(size: 10.5)).foregroundStyle(.secondary).textSelection(.enabled)
                     StepRow(number: 3, text: "Наведите камеру на QR-код и скачайте сертификат (или откройте **http://snifix.cert** в Safari).")
                     StepRow(number: 4, text: "Настройки → Основные → **VPN и управление устройством** → Snifix CA → Установить.")
                     StepRow(number: 5, text: "Основные → Об этом устройстве → **Доверие сертификатам** → включить Snifix CA. Без этого шага HTTPS не расшифруется. Надпись «Не проверено» у профиля — это нормально.")
