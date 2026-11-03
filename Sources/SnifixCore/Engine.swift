@@ -1,0 +1,327 @@
+import Foundation
+import NIOCore
+import NIOPosix
+import NIOSSL
+import NIOConcurrencyHelpers
+
+public struct ProxySettings: Codable, Sendable, Equatable {
+    public var port = 9090
+    public var decryptHTTPS = true
+    public var verifyUpstreamCertificates = true
+    /// Hosts whose clients reject the Snifix certificate are tunneled afterwards, so the app keeps working.
+    public var autoBypassPinned = true
+    public var enableSystemProxyOnLaunch = true
+    public var iPhoneMode: IPhoneMode = .usbOnly
+    public var androidAutoConnect = true
+    public var maxFlows = 20000
+    public init() {}
+
+    public enum IPhoneMode: String, Codable, CaseIterable, Sendable { case always, usbOnly, off }
+
+    public init(from decoder: Decoder) throws {
+        let d = ProxySettings()
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        port = try c.decodeIfPresent(Int.self, forKey: .port) ?? d.port
+        decryptHTTPS = try c.decodeIfPresent(Bool.self, forKey: .decryptHTTPS) ?? d.decryptHTTPS
+        verifyUpstreamCertificates = try c.decodeIfPresent(Bool.self, forKey: .verifyUpstreamCertificates) ?? d.verifyUpstreamCertificates
+        autoBypassPinned = try c.decodeIfPresent(Bool.self, forKey: .autoBypassPinned) ?? d.autoBypassPinned
+        enableSystemProxyOnLaunch = try c.decodeIfPresent(Bool.self, forKey: .enableSystemProxyOnLaunch) ?? d.enableSystemProxyOnLaunch
+        iPhoneMode = try c.decodeIfPresent(IPhoneMode.self, forKey: .iPhoneMode) ?? d.iPhoneMode
+        androidAutoConnect = try c.decodeIfPresent(Bool.self, forKey: .androidAutoConnect) ?? d.androidAutoConnect
+        maxFlows = try c.decodeIfPresent(Int.self, forKey: .maxFlows) ?? d.maxFlows
+    }
+}
+
+public enum BreakpointPhase: Sendable {
+    case request(RequestData)
+    case response(RequestData, ResponseData)
+}
+
+public struct BreakpointEvent: Sendable, Identifiable {
+    public let id = UUID()
+    public let flowID: Int
+    public let ruleName: String
+    public let phase: BreakpointPhase
+}
+
+public enum BreakpointDecision: Sendable {
+    case proceedRequest(RequestData)
+    case proceedResponse(ResponseData)
+    case abort
+}
+
+enum Outcome {
+    case respond(ResponseData, close: Bool)
+    case drop
+}
+
+/// The proxy: listens for clients, decrypts HTTPS, applies the rules and reports flows.
+public final class ProxyEngine: @unchecked Sendable {
+    public let ca: CertificateAuthority
+    public let sink: FlowSink
+    public let scripts = ScriptRunner()
+    private let group = MultiThreadedEventLoopGroup(numberOfThreads: max(2, System.coreCount / 2))
+    private var serverChannel: Channel?
+    private let state: NIOLockedValueBox<(rules: RulesDocument, settings: ProxySettings, recording: Bool)>
+    private let nextID = NIOLockedValueBox(1)
+    private let bypassed = NIOLockedValueBox<Set<String>>([])
+    private let tlsClientContexts = NIOLockedValueBox<[Bool: NIOSSLContext]>([:])
+
+    public var breakpointHandler: (@Sendable (BreakpointEvent) async -> BreakpointDecision)?
+    /// Whether /proxy.pac sends devices through Snifix (iPhone on USB, or always).
+    public var pacEnabled: @Sendable () -> Bool = { true }
+
+    public init(ca: CertificateAuthority, sink: FlowSink, rules: RulesDocument, settings: ProxySettings) {
+        self.ca = ca
+        self.sink = sink
+        state = NIOLockedValueBox((rules, settings, true))
+    }
+
+    public var rules: RulesDocument {
+        get { state.withLockedValue { $0.rules } }
+        set { state.withLockedValue { $0.rules = newValue } }
+    }
+    public var settings: ProxySettings {
+        get { state.withLockedValue { $0.settings } }
+        set { state.withLockedValue { $0.settings = newValue } }
+    }
+    public var recording: Bool {
+        get { state.withLockedValue { $0.recording } }
+        set { state.withLockedValue { $0.recording = newValue } }
+    }
+    public var autoBypassedHosts: [String] { bypassed.withLockedValue { Array($0).sorted() } }
+    public func clearAutoBypass() { bypassed.withLockedValue { $0.removeAll() } }
+
+    public var port: Int { settings.port }
+    public var isRunning: Bool { serverChannel?.isActive ?? false }
+
+    public func start() throws {
+        stop()
+        let bootstrap = ServerBootstrap(group: group)
+            .serverChannelOption(ChannelOptions.backlog, value: 512)
+            .serverChannelOption(ChannelOptions.socketOption(.so_reuseaddr), value: 1)
+            .childChannelOption(ChannelOptions.socketOption(.tcp_nodelay), value: 1)
+            .childChannelInitializer { [self] channel in
+                channel.eventLoop.makeCompletedFuture {
+                    try ProxyPipeline.installHTTP(on: channel, engine: self, scheme: "http", target: nil,
+                                                  client: ClientResolver.resolve(channel: channel))
+                }
+            }
+        serverChannel = try bootstrap.bind(host: "0.0.0.0", port: settings.port).wait()
+    }
+
+    public func stop() {
+        try? serverChannel?.close().wait()
+        serverChannel = nil
+    }
+
+    // MARK: - Decisions used by the pipeline
+
+    func shouldDecrypt(host: String) -> Bool {
+        let (rules, settings, _) = state.withLockedValue { $0 }
+        guard settings.decryptHTTPS else { return false }
+        if hostMatches(host, rules.sslBypass) { return false }
+        if rules.allowListEnabled && !hostMatches(host, rules.allowList) { return false }
+        return !bypassed.withLockedValue { $0.contains(host.lowercased()) }
+    }
+
+    func shouldRecord(host: String) -> Bool {
+        let (rules, _, recording) = state.withLockedValue { $0 }
+        guard recording else { return false }
+        return !rules.allowListEnabled || hostMatches(host, rules.allowList)
+    }
+
+    func markPinned(host: String) {
+        guard settings.autoBypassPinned else { return }
+        bypassed.withLockedValue { _ = $0.insert(host.lowercased()) }
+    }
+
+    func connectAddress(for host: String) -> String {
+        rules.dnsOverrides.first { $0.enabled && hostMatches(host, [$0.host]) }?.address ?? host
+    }
+
+    func clientTLSContext() throws -> NIOSSLContext {
+        let verify = settings.verifyUpstreamCertificates
+        if let c = tlsClientContexts.withLockedValue({ $0[verify] }) { return c }
+        var config = TLSConfiguration.makeClientConfiguration()
+        config.applicationProtocols = ["http/1.1"]
+        config.certificateVerification = verify ? .fullVerification : .none
+        let c = try NIOSSLContext(configuration: config)
+        tlsClientContexts.withLockedValue { $0[verify] = c }
+        return c
+    }
+
+    func makeRecorder(request: RequestData, client: ClientInfo, isSSL: Bool) -> FlowRecorder? {
+        guard shouldRecord(host: request.host) else { return nil }
+        let id = nextID.withLockedValue { v -> Int in defer { v += 1 }; return v }
+        var c = client
+        if c.appName == nil { c.appName = ClientResolver.appName(fromUserAgent: request.headers["User-Agent"]) }
+        if c.deviceName == nil { c.deviceName = ClientResolver.deviceName(fromUserAgent: request.headers["User-Agent"], isLocal: c.isLocal) }
+        let flow = FlowData(id: id, startedAt: Date(), client: c, request: request, isSSL: isSSL)
+        return FlowRecorder(flow: flow, sink: sink)
+    }
+
+    // MARK: - Rules pipeline
+
+    func process(_ original: RequestData, recorder: FlowRecorder?,
+                 fetch: @escaping (RequestData) async throws -> ResponseData) async -> Outcome {
+        let doc = rules
+        var request = original
+        let flowID = recorder?.id ?? 0
+
+        if let rule = doc.activeRules(.block).first(where: { $0.matcher.matches(request) }) {
+            recorder?.addRule(rule.name)
+            if rule.blockMode == .dropConnection {
+                recorder?.fail("Соединение сброшено правилом «\(rule.name)»")
+                return .drop
+            }
+            let response = ResponseData(statusCode: rule.blockMode == .forbidden ? 403 : 404,
+                                        headers: [HTTPHeader("Content-Type", "text/plain; charset=utf-8")],
+                                        body: Data("Blocked by Snifix".utf8))
+            recorder?.complete(response)
+            return .respond(response, close: false)
+        }
+
+        var response: ResponseData
+        if let rule = doc.activeRules(.mapLocal).first(where: { $0.matcher.matches(request) }) {
+            recorder?.addRule(rule.name)
+            response = MapLocal.response(for: rule, request: request)
+        } else {
+            if let rule = doc.activeRules(.breakpoint).first(where: { $0.breakOnRequest && $0.matcher.matches(request) }),
+               let handler = breakpointHandler {
+                recorder?.addRule(rule.name)
+                recorder?.update { $0.state = .paused }
+                let decision = await handler(BreakpointEvent(flowID: flowID, ruleName: rule.name, phase: .request(request)))
+                guard case .proceedRequest(let edited) = decision else {
+                    recorder?.fail("Прервано на точке останова")
+                    return .drop
+                }
+                request = edited
+                recorder?.update { $0.state = .active; $0.request = edited }
+            }
+            for rule in doc.activeRules(.script) where rule.matcher.matches(request) {
+                recorder?.addRule(rule.name)
+                request = await scripts.runRequest(rule: rule, request: request)
+            }
+            if let rule = doc.activeRules(.mapRemote).first(where: { $0.matcher.matches(request) }) {
+                recorder?.addRule(rule.name)
+                request = MapRemote.apply(rule.mapRemote, to: request)
+            }
+            for rule in doc.activeRules(.rewrite) where rule.matcher.matches(request) {
+                let changed = Rewriter.apply(rule.rewrite, to: &request)
+                if changed { recorder?.addRule(rule.name) }
+            }
+            if request.url != original.url || request.headers != original.headers || request.body != original.body {
+                recorder?.update { $0.request = request }
+            }
+            do {
+                response = try await fetch(request)
+            } catch {
+                let message = ProxyErrors.describe(error)
+                recorder?.fail(message)
+                return .respond(ProxyErrors.page(message, request: request), close: true)
+            }
+        }
+        recorder?.update { $0.responseStartedAt = Date() }
+
+        for rule in doc.activeRules(.rewrite) where rule.matcher.matches(request) {
+            if Rewriter.apply(rule.rewrite, to: &response) { recorder?.addRule(rule.name) }
+        }
+        for rule in doc.activeRules(.script) where rule.matcher.matches(request) {
+            recorder?.addRule(rule.name)
+            response = await scripts.runResponse(rule: rule, request: request, response: response)
+        }
+        if let rule = doc.activeRules(.breakpoint).first(where: { $0.breakOnResponse && $0.matcher.matches(request) }),
+           let handler = breakpointHandler {
+            recorder?.addRule(rule.name)
+            recorder?.update { $0.state = .paused; $0.response = response }
+            let decision = await handler(BreakpointEvent(flowID: flowID, ruleName: rule.name, phase: .response(request, response)))
+            guard case .proceedResponse(let edited) = decision else {
+                recorder?.fail("Прервано на точке останова")
+                return .drop
+            }
+            response = edited
+        }
+        if let rule = doc.activeRules(.throttle).first(where: { $0.matcher.matches(request) }) {
+            recorder?.addRule(rule.name)
+            var ms = Double(rule.throttle.latencyMs)
+            if rule.throttle.downloadKbps > 0 { ms += Double(response.body.count * 8) / Double(rule.throttle.downloadKbps) }
+            try? await Task.sleep(nanoseconds: UInt64(ms * 1_000_000))
+        }
+        recorder?.complete(response)
+        return .respond(response, close: false)
+    }
+}
+
+/// Holds one flow and publishes every change of it.
+final class FlowRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var flow: FlowData
+    private let sink: FlowSink
+    let id: Int
+
+    init(flow: FlowData, sink: FlowSink) {
+        self.flow = flow
+        self.sink = sink
+        id = flow.id
+        sink.emit(.updated(flow))
+    }
+
+    func update(_ change: (inout FlowData) -> Void) {
+        lock.lock()
+        change(&flow)
+        let snapshot = flow
+        lock.unlock()
+        sink.emit(.updated(snapshot))
+    }
+
+    func addRule(_ name: String) { update { if !$0.matchedRules.contains(name) { $0.matchedRules.append(name) } } }
+
+    func complete(_ response: ResponseData) {
+        update { $0.response = response; $0.state = .completed; $0.completedAt = Date() }
+    }
+
+    func fail(_ message: String) {
+        update { $0.state = .failed(message); $0.completedAt = Date() }
+    }
+}
+
+enum ProxyErrors {
+    static func describe(_ error: Error) -> String {
+        if let e = error as? NIOSSLError {
+            if case .handshakeFailed(let inner) = e {
+                let text = "\(inner)"
+                if text.contains("CERTIFICATE_VERIFY_FAILED") {
+                    return "Сертификат сервера не прошёл проверку. Если это тестовый сервер, выключите «Проверять сертификаты серверов» в настройках."
+                }
+                return "Ошибка TLS с сервером: \(text)"
+            }
+            return "Ошибка TLS: \(e)"
+        }
+        if let e = error as? UpstreamError { return e.message }
+        if let e = error as? IOError { return "Сетевая ошибка: \(e.description)" }
+        if error is ChannelError { return "Соединение с сервером закрыто" }
+        if let e = error as? NIOConnectionError {
+            if e.dnsAAAAError != nil || e.dnsAError != nil { return "Не удалось найти адрес хоста \(e.host)" }
+            return "Не удалось подключиться к \(e.host):\(e.port)"
+        }
+        return "\(error)"
+    }
+
+    static func page(_ message: String, request: RequestData) -> ResponseData {
+        ResponseData(statusCode: 502, reason: "Bad Gateway",
+                     headers: [HTTPHeader("Content-Type", "text/plain; charset=utf-8"), HTTPHeader("X-Snifix-Error", "1")],
+                     body: Data("Snifix: \(message)\n\(request.url)\n".utf8))
+    }
+}
+
+enum UpstreamError: Error {
+    case closed(beforeResponse: Bool)
+    case timeout
+    var message: String {
+        switch self {
+        case .closed: return "Сервер закрыл соединение, не ответив"
+        case .timeout: return "Сервер не ответил за 120 секунд"
+        }
+    }
+}

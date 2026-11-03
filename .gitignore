@@ -1,0 +1,4 @@
+.build/
+.swiftpm/
+dist/
+Resources/AppIcon.iconset/
