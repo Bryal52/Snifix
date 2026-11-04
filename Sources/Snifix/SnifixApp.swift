@@ -40,7 +40,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     RulesState.shared.selectedRule = rule.id
                 }
                 if let sel = env["SNIFIX_SNAPSHOT_SELECT"], let id = Int(sel) { model.selection = [id] }
-                if let f = model.focusedFlow ?? model.selection.first.flatMap({ model.flows[$0] }) { ComposeState.shared.load(f) }
+                if let f = model.focusedFlow ?? model.selection.first.flatMap({ model.flows[$0] }) { _ = ComposeState.shared.load(f) }
                 if let body = env["SNIFIX_SNAPSHOT_COMPOSE_BODY"] {
                     ComposeState.shared.response?.body = body
                     ComposeState.shared.response?.bodyEdited = true
@@ -181,7 +181,7 @@ struct SnifixCommands: Commands {
             }
             .keyboardShortcut("p", modifiers: [.command, .shift])
             Divider()
-            Button("Repeat Selected") { for f in model.selectedFlows() { model.repeatRequest(f.request) } }
+            Button("Repeat Selected") { model.repeatRequest(model.selectedFlows()) }
                 .keyboardShortcut("r", modifiers: [.command, .shift])
             Button("Copy as cURL") {
                 if let f = model.focusedFlow { model.copy(Export.curl(f.request), note: "cURL copied") }

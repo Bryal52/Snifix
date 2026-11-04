@@ -116,6 +116,9 @@ final class FrameRelay: ChannelInboundHandler, RemovableChannelHandler {
     private let recorder: FlowRecorder?
     private var pending = ByteBuffer()
     private var tooBig = false
+    /// Payload bytes kept for display in this direction; later messages keep only their metadata.
+    private var kept = 0
+    private static let keepLimit = 32 * 1024 * 1024
     private static let counter = NSLock()
     private static var nextMessageID = 1
 
@@ -130,7 +133,13 @@ final class FrameRelay: ChannelInboundHandler, RemovableChannelHandler {
         pending.writeBuffer(&buffer)
         // A frame this large is relayed but no longer parsed for display
         if pending.readableBytes > 32 * 1024 * 1024 { tooBig = true; pending.clear(); return }
-        while let message = parseFrame() {
+        while var message = parseFrame() {
+            if kept + message.payload.count > FrameRelay.keepLimit {
+                message.droppedSize = message.payload.count
+                message.payload = Data()
+            } else {
+                kept += message.payload.count
+            }
             recorder?.update {
                 if $0.webSocketMessages.count < 10000 { $0.webSocketMessages.append(message) }
             }

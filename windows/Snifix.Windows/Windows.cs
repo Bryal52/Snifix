@@ -31,6 +31,8 @@ public sealed class ComposeWindow : Window
 
     public static void Open(Window owner, Flow? flow)
     {
+        // Without its body the request would reach the server changed
+        if (flow?.RequestBodyDropped == true) { AppState.Shared.ShowToast("Request body was not kept (memory limit)"); return; }
         current ??= new ComposeWindow();
         current.Load(flow);
         if (!current.IsVisible) current.Show(owner);

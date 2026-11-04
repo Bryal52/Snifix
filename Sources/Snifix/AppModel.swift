@@ -270,6 +270,9 @@ final class AppModel {
     private(set) var rows: [FlowRow] = []
     private var rowIndex: [Int: Int] = [:]
     private(set) var flows: [Int: FlowData] = [:]
+    /// Body bytes held by each flow and in total, for the memory limit.
+    private var bodyBytes: [Int: Int] = [:]
+    private var storedBodyBytes = 0
     private(set) var visibleRows: [FlowRow] = []
     var selection: Set<Int> = [] { didSet { if selection.count == 1 { focusedID = selection.first } } }
     var focusedID: Int?
@@ -289,7 +292,9 @@ final class AppModel {
         didSet { UserDefaults.standard.set(sidebarSort.rawValue, forKey: "sidebarSort"); rebuildSummaries() }
     }
 
-    var settings: ProxySettings { didSet { engine.settings = settings; save(settings, "settings.json"); updatePAC() } }
+    var settings: ProxySettings {
+        didSet { engine.settings = settings; save(settings, "settings.json"); updatePAC(); enforceBodyLimit() }
+    }
     private let pacFlag = Flag()
     var rules: RulesDocument { didSet { engine.rules = rules; scheduleRulesSave() } }
 
@@ -454,7 +459,7 @@ final class AppModel {
         guard !updates.isEmpty else { return }
         var newCount = 0
         for f in updates {
-            flows[f.id] = f
+            store(f)
             let row = FlowRow(f)
             if let i = rowIndex[f.id] {
                 rows[i] = row
@@ -466,15 +471,65 @@ final class AppModel {
         }
         flowsPerSecond[flowsPerSecond.count - 1] += newCount
         if rows.count > settings.maxFlows { trim(to: settings.maxFlows) }
+        enforceBodyLimit()
         rebuildSummaries()
         refreshVisible()
     }
 
     private func trim(to count: Int) {
         let drop = rows.count - count
-        for r in rows.prefix(drop) { flows.removeValue(forKey: r.id) }
+        for r in rows.prefix(drop) { forget(r.id) }
         rows.removeFirst(drop)
         reindex()
+    }
+
+    private func store(_ f: FlowData) {
+        let size = f.request.body.count + (f.response?.body.count ?? 0) + f.webSocketMessages.reduce(0) { $0 + $1.payload.count }
+        storedBodyBytes += size - (bodyBytes.updateValue(size, forKey: f.id) ?? 0)
+        flows[f.id] = f
+    }
+
+    private func forget(_ id: Int) {
+        flows.removeValue(forKey: id)
+        storedBodyBytes -= bodyBytes.removeValue(forKey: id) ?? 0
+    }
+
+    /// Above the memory limit, bodies of the oldest finished requests are removed until 90% of it is left.
+    /// Headers, status, timing and the sizes in the list stay; the selected request is never touched.
+    /// Request bodies up to 1 MB go only if removing everything else was not enough,
+    /// so Repeat and Edit & Send keep working for almost every request.
+    private func enforceBodyLimit() {
+        let limit = max(settings.bodyMemoryMB, 64) * 1_048_576
+        guard storedBodyBytes > limit else { return }
+        let target = limit / 10 * 9
+        let keep = selection.union(focusedID.map { [$0] } ?? [])
+        for keptRequest in [1_048_576, 0] {
+            for r in rows where storedBodyBytes > target {
+                guard !keep.contains(r.id), (bodyBytes[r.id] ?? 0) > 0, var f = flows[r.id] else { continue }
+                switch f.state {
+                case .completed, .failed: break
+                default: guard f.completedAt != nil else { continue }
+                }
+                var changed = false
+                if f.request.body.count > keptRequest {
+                    f.request.body = Data()
+                    f.requestBodyDropped = true
+                    changed = true
+                }
+                if let body = f.response?.body, !body.isEmpty {
+                    f.response?.body = Data()
+                    f.bodiesDropped = true
+                    changed = true
+                }
+                for i in f.webSocketMessages.indices where !f.webSocketMessages[i].payload.isEmpty {
+                    f.webSocketMessages[i].droppedSize = f.webSocketMessages[i].payload.count
+                    f.webSocketMessages[i].payload = Data()
+                    f.bodiesDropped = true
+                    changed = true
+                }
+                if changed { store(f) }
+            }
+        }
     }
 
     private func reindex() {
@@ -591,6 +646,8 @@ final class AppModel {
         rows.removeAll()
         rowIndex.removeAll()
         flows.removeAll()
+        bodyBytes.removeAll()
+        storedBodyBytes = 0
         selection.removeAll()
         focusedID = nil
         rebuildSummaries()
@@ -599,7 +656,7 @@ final class AppModel {
 
     func remove(_ ids: Set<Int>) {
         rows.removeAll { ids.contains($0.id) }
-        for id in ids { flows.removeValue(forKey: id) }
+        for id in ids { forget(id) }
         selection.subtract(ids)
         reindex()
         rebuildSummaries()
@@ -612,10 +669,16 @@ final class AppModel {
         selection.compactMap { flows[$0] }.sorted { $0.id < $1.id }
     }
 
-    func repeatRequest(_ request: RequestData) {
+    func repeatRequest(_ flows: [FlowData]) {
+        // Without its body the request would reach the server changed
+        let list = flows.filter { $0.requestBodyDropped != true }
+        if list.count < flows.count {
+            showToast("Request body was not kept (memory limit) — not sent", symbol: "exclamationmark.triangle.fill")
+        }
+        guard !list.isEmpty else { return }
         let engine = self.engine
-        Task.detached { await engine.replay(request) }
-        showToast("Request sent again", symbol: "arrow.clockwise.circle.fill")
+        for f in list { let request = f.request; Task.detached { await engine.replay(request) } }
+        if list.count == flows.count { showToast("Request sent again", symbol: "arrow.clockwise.circle.fill") }
     }
 
     // MARK: - Sessions
@@ -659,10 +722,11 @@ final class AppModel {
         recording = false
         clear()
         for f in list {
-            flows[f.id] = f
+            store(f)
             rowIndex[f.id] = rows.count
             rows.append(FlowRow(f))
         }
+        enforceBodyLimit()
         rebuildSummaries()
         refreshVisible()
         showToast("Opened \(list.count) requests · recording paused")

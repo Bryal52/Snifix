@@ -15,6 +15,8 @@ public struct ProxySettings: Codable, Sendable, Equatable {
     public var iPhoneMode: IPhoneMode = .always
     public var androidAutoConnect = true
     public var maxFlows = 20000
+    /// Memory for stored request, response and WebSocket bodies; older bodies are removed above it.
+    public var bodyMemoryMB = 1024
     /// HTTP/2 with clients and servers (ALPN); off means HTTP/1.1 everywhere.
     public var http2 = true
     /// Who else on the network may use the proxy: ask for each new device, everyone on the local network, or nobody.
@@ -42,6 +44,7 @@ public struct ProxySettings: Codable, Sendable, Equatable {
         iPhoneMode = try c.decodeIfPresent(IPhoneMode.self, forKey: .iPhoneMode) ?? d.iPhoneMode
         androidAutoConnect = try c.decodeIfPresent(Bool.self, forKey: .androidAutoConnect) ?? d.androidAutoConnect
         maxFlows = try c.decodeIfPresent(Int.self, forKey: .maxFlows) ?? d.maxFlows
+        bodyMemoryMB = try c.decodeIfPresent(Int.self, forKey: .bodyMemoryMB) ?? d.bodyMemoryMB
         http2 = try c.decodeIfPresent(Bool.self, forKey: .http2) ?? d.http2
         remoteAccess = try c.decodeIfPresent(RemoteAccess.self, forKey: .remoteAccess) ?? d.remoteAccess
         approvedClients = try c.decodeIfPresent([String].self, forKey: .approvedClients) ?? d.approvedClients

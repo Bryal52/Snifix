@@ -161,9 +161,33 @@ public sealed class AppState : INotifyPropertyChanged
             foreach (var f in drop) Visible.Remove(f);
         }
         if (!changed) return;
+        EnforceBodyLimit();
         RebuildSidebar();
         Changed(nameof(CountText));
         Changed(nameof(Total));
+    }
+
+    /// The request open in the detail panes; its bodies are never removed.
+    public Flow? Shown { get; set; }
+
+    /// Above the memory limit, bodies of the oldest finished requests are removed until 90% of it is left.
+    /// Request bodies up to 1 MB go only if removing everything else was not enough,
+    /// so Repeat and Edit & Send keep working for almost every request.
+    void EnforceBodyLimit()
+    {
+        long limit = Math.Max(Settings.BodyMemoryMb, 64) * 1048576L, stored = 0;
+        foreach (var f in all) stored += f.StoredBytes;
+        if (stored <= limit) return;
+        var target = limit / 10 * 9;
+        foreach (var keptRequest in new[] { 1048576, 0 })
+            foreach (var f in all)
+            {
+                if (stored <= target) return;
+                if (f == Shown || f.StoredBytes == 0 || f.State is not (FlowState.Completed or FlowState.Failed)) continue;
+                stored -= f.StoredBytes;
+                f.DropBodies(keptRequest);
+                stored += f.StoredBytes;
+            }
     }
 
     bool Passes(Flow f)

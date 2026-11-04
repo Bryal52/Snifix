@@ -366,6 +366,10 @@ struct SettingsView: View {
                 Picker("Keep requests", selection: bind(\.maxFlows)) {
                     ForEach([2000, 5000, 20000, 50000, 100000], id: \.self) { Text("\($0)").tag($0) }
                 }
+                Picker("Memory for bodies", selection: bind(\.bodyMemoryMB)) {
+                    ForEach([256, 512, 1024, 2048, 4096], id: \.self) { Text($0 < 1024 ? "\($0) MB" : "\($0 / 1024) GB").tag($0) }
+                }
+                Text("Above this, the oldest requests keep their headers but lose their bodies.").font(.caption).foregroundStyle(.secondary)
             }
             Section("Files") {
                 Button("Open Snifix Folder") { NSWorkspace.shared.open(model.supportDirectory) }

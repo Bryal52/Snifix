@@ -116,6 +116,7 @@ public partial class MainWindow : Window
     void ShowDetail(Flow? f)
     {
         shown = f;
+        state.Shown = f;
         if (f == null)
         {
             RequestTitle.Text = ResponseTitle.Text = "";
@@ -139,8 +140,9 @@ public partial class MainWindow : Window
         sb.AppendLine($"Duration       {f.DurationText}");
         sb.AppendLine($"HTTPS          {(f.IsHttps ? "Yes, decrypted by Snifix" : "No")}");
         sb.AppendLine($"Protocol       client {f.RequestVersion}, server {(f.ResponseVersion == "" ? "—" : f.ResponseVersion)}");
-        sb.AppendLine($"Request size   {Format.Bytes(f.RequestBody.Length)}");
-        sb.AppendLine($"Response size  {Format.Bytes(f.ResponseBody.Length)}");
+        sb.AppendLine($"Request size   {Format.Bytes(f.RequestSize)}");
+        sb.AppendLine($"Response size  {Format.Bytes(f.ResponseSize)}");
+        if (f.BodiesDropped || f.RequestBodyDropped) sb.AppendLine($"Bodies         {DroppedNote}");
         if (f.Rules.Count > 0) sb.AppendLine($"Rules          {f.RuleNames}");
         if (f.Error != "") sb.AppendLine($"Error          {f.Error}");
         Summary.Text = sb.ToString();
@@ -162,7 +164,11 @@ public partial class MainWindow : Window
             ResponseBody.Text = Pretty(text);
             ResponseRaw.Text = $"{f.ResponseVersion} {f.StatusCode} {f.Reason}\n{HeadersText(f.ResponseHeaders)}\n\n{text}";
         }
+        if (f.RequestBodyDropped) RequestBody.Text = DroppedNote;
+        if (f.BodiesDropped && f.State == FlowState.Completed) ResponseBody.Text = DroppedNote;
     }
+
+    const string DroppedNote = "Not kept: older bodies are removed when stored bodies pass the memory limit. Headers and timing are kept.";
 
     static string HeadersText(List<HeaderItem> headers) => string.Join("\n", headers.Select(h => $"{h.Name}: {h.Value}"));
     static string Pretty(string text) => text.TrimStart().StartsWith('{') || text.TrimStart().StartsWith('[') ? Body.PrettyJson(text) : text;
@@ -185,7 +191,11 @@ public partial class MainWindow : Window
         menu.Items.Add(Item("Copy as cURL", f => Copy(Curl(f), "cURL copied")));
         menu.Items.Add(Item("Copy Response Body", f => Copy(Body.Text(f.ResponseBody, f.ResponseHeader("Content-Encoding")))));
         menu.Items.Add(new Separator());
-        menu.Items.Add(Item("Repeat", f => _ = state.Engine.Send(f.Method, f.Url, f.RequestHeaders, f.RequestBody)));
+        menu.Items.Add(Item("Repeat", f =>
+        {
+            if (f.RequestBodyDropped) ShowToast("Request body was not kept (memory limit) — not sent");
+            else _ = state.Engine.Send(f.Method, f.Url, f.RequestHeaders, f.RequestBody);
+        }));
         menu.Items.Add(Item("Edit & Send…", f => ComposeWindow.Open(this, f)));
         menu.Items.Add(Item("Script for This Request…", f => NewRule(RuleKind.script, f)));
         menu.Items.Add(Item("Map Local (Mock Response)…", f => NewRule(RuleKind.mapLocal, f)));

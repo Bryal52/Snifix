@@ -61,7 +61,7 @@ struct RequestPane: View {
         let r = flow.request
         VStack(alignment: .leading, spacing: 8) {
             PaneHeader(title: "REQUEST", subtitle: "\(r.method) \(r.path)", color: Theme.methodColor(r.method)) {
-                Button { model.repeatRequest(r) } label: { Image(systemName: "arrow.clockwise") }
+                Button { model.repeatRequest([flow]) } label: { Image(systemName: "arrow.clockwise") }
                     .buttonStyle(.borderless).help("Repeat")
             }
             HStack {
@@ -81,7 +81,7 @@ struct RequestPane: View {
                 switch tab.wrappedValue {
                 case .headers: HeaderList(headers: r.headers)
                 case .query: HeaderList(headers: r.queryItems, empty: "No query parameters")
-                case .body: BodyView(data: r.body, headers: r.headers, fileName: "request")
+                case .body: BodyView(data: r.body, headers: r.headers, fileName: "request", dropped: flow.requestBodyDropped == true)
                 case .cookies: HeaderList(headers: Cookies.fromRequest(r.headers), empty: "No cookies")
                 case .raw: CodeView(text: Export.rawRequest(r))
                 case .summary: SummaryView(flow: flow)
@@ -123,7 +123,7 @@ struct ResponsePane: View {
                 Group {
                     switch tab.wrappedValue {
                     case .headers: HeaderList(headers: res.headers)
-                    case .body: BodyView(data: res.body, headers: res.headers, fileName: "response")
+                    case .body: BodyView(data: res.body, headers: res.headers, fileName: "response", dropped: flow.bodiesDropped == true)
                     case .tree: JSONTree(data: BodyCodec.decoded(res.body, headers: res.headers))
                     case .cookies: HeaderList(headers: Cookies.fromResponse(res.headers), empty: "No cookies")
                     case .raw: CodeView(text: Export.rawResponse(res))
@@ -190,6 +190,7 @@ struct BodyView: View {
     let data: Data
     let headers: [HTTPHeader]
     var fileName: String
+    var dropped = false
     @UIState private var pretty = true
     @UIState private var decoded: Data?
     @Environment(AppModel.self) private var model
@@ -209,7 +210,10 @@ struct BodyView: View {
     @ViewBuilder
     private func content(_ decoded: Data) -> some View {
         let type = headers["Content-Type"]?.lowercased() ?? ""
-        if decoded.isEmpty {
+        if decoded.isEmpty && dropped {
+            EmptyState(symbol: "memorychip", title: "Body not kept",
+                       subtitle: "Older bodies are removed when stored bodies pass the memory limit (Settings → List). Headers and timing are kept.")
+        } else if decoded.isEmpty {
             EmptyState(symbol: "doc", title: "Empty body", subtitle: "")
         } else if type.hasPrefix("image/"), let image = NSImage(data: decoded) {
             VStack {
@@ -291,7 +295,8 @@ struct WebSocketList: View {
                     HStack(spacing: 8) {
                         Image(systemName: m.fromClient ? "arrow.up.circle.fill" : "arrow.down.circle.fill")
                             .foregroundStyle(m.fromClient ? Theme.gold : .green)
-                        Text(m.isText ? String(decoding: m.payload.prefix(300), as: UTF8.self) : opcodeName(m))
+                        Text(m.droppedSize.map { "<not kept, \(formatBytes($0))>" }
+                             ?? (m.isText ? String(decoding: m.payload.prefix(300), as: UTF8.self) : opcodeName(m)))
                             .font(.system(size: 11.5, design: .monospaced)).lineLimit(1)
                         Spacer()
                         Text(timeFormatter.string(from: m.date)).font(.system(size: 10)).foregroundStyle(.secondary)

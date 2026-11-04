@@ -194,7 +194,12 @@ final class ComposeState {
         request.headers = [HTTPHeader("Accept", "application/json")]
     }
 
-    func load(_ flow: FlowData) {
+    /// False when the request body was removed for the memory limit: sending it would change the request.
+    func load(_ flow: FlowData) -> Bool {
+        guard flow.requestBodyDropped != true else {
+            AppModel.shared.showToast("Request body was not kept (memory limit)", symbol: "exclamationmark.triangle.fill")
+            return false
+        }
         template = flow.request
         request = EditableMessage(request: flow.request)
         request.bodyEdited = false
@@ -204,6 +209,7 @@ final class ComposeState {
         sourceFlowID = flow.id
         lastDuration = flow.duration
         mockRuleID = nil
+        return true
     }
 
     func load(_ request: RequestData) {

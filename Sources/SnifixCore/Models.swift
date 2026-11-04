@@ -116,6 +116,8 @@ public struct WebSocketMessage: Sendable, Codable, Identifiable {
     public var fromClient: Bool
     public var opcode: UInt8
     public var payload: Data
+    /// Original payload size when the payload was not kept (over the memory limit).
+    public var droppedSize: Int?
     public var isText: Bool { opcode == 1 }
 }
 
@@ -135,6 +137,10 @@ public struct FlowData: Sendable, Identifiable, Codable {
     public var tunnelBytesDown = 0
     public var webSocketMessages: [WebSocketMessage] = []
     public var isWebSocket = false
+    /// The response body (or WebSocket payloads) was removed to stay under the memory limit; headers and metadata are kept.
+    public var bodiesDropped: Bool?
+    /// The request body itself was removed, so the request cannot be sent again as it was.
+    public var requestBodyDropped: Bool?
 
     public var duration: TimeInterval? { completedAt.map { $0.timeIntervalSince(startedAt) } }
 }

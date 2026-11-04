@@ -737,8 +737,7 @@ struct FlowTable: View {
                 .contextMenu(forSelectionType: Int.self) { ids in
                     FlowContextMenu(ids: ids)
                 } primaryAction: { ids in
-                    if let id = ids.first, let f = model.flows[id] {
-                        ComposeState.shared.load(f)
+                    if let id = ids.first, let f = model.flows[id], ComposeState.shared.load(f) {
                         openWindow(id: "compose")
                     }
                 }
@@ -794,10 +793,9 @@ struct FlowContextMenu: View {
                 }
             }
             Divider()
-            Button("Repeat") { for x in flows { model.repeatRequest(x.request) } }
+            Button("Repeat") { model.repeatRequest(flows) }
             Button("Edit & Send…") {
-                ComposeState.shared.load(f)
-                openWindow(id: "compose")
+                if ComposeState.shared.load(f) { openWindow(id: "compose") }
             }
             Button("Script for This Request…") { create(.script, f) }
             Button("Map Local (Mock Response)…") { create(.mapLocal, f) }

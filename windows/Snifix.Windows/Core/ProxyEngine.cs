@@ -25,6 +25,8 @@ public sealed class ProxySettings
     /// "always" — phones using the PAC address go through Snifix; "off" — the PAC says DIRECT.
     public string PhoneMode { get; set; } = "always";
     public int MaxFlows { get; set; } = 20000;
+    /// Memory for stored request and response bodies; older bodies are removed above it.
+    public int BodyMemoryMb { get; set; } = 1024;
     /// Who else on the network may use the proxy: "ask" for each new device, "always" on the local network, or "never".
     public string RemoteAccess { get; set; } = "ask";
     /// Addresses of devices the user allowed. Locked while read or changed: proxy threads read it.

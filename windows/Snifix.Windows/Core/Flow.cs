@@ -72,7 +72,32 @@ public sealed class Flow : INotifyPropertyChanged
     public bool HasRules => Rules.Count > 0;
     public string TimeText => Started.ToString("HH:mm:ss.fff");
     public string DurationText => Completed is DateTime d ? Format.Duration((d - Started).TotalSeconds) : "…";
-    public string SizeText => Format.Bytes(ResponseBody.Length);
+    public string SizeText => Format.Bytes(ResponseSize);
+
+    /// Bodies were removed to stay under the memory limit; headers and sizes are kept.
+    public bool BodiesDropped { get; private set; }
+    public bool RequestBodyDropped { get; private set; }
+    int droppedRequestSize, droppedResponseSize;
+    public int RequestSize => RequestBodyDropped ? droppedRequestSize : RequestBody.Length;
+    public int ResponseSize => BodiesDropped ? droppedResponseSize : ResponseBody.Length;
+    public int StoredBytes => RequestBody.Length + ResponseBody.Length;
+
+    /// Removes the response body and a request body larger than keptRequest bytes.
+    public void DropBodies(int keptRequest)
+    {
+        if (RequestBody.Length > keptRequest)
+        {
+            droppedRequestSize = RequestBody.Length;
+            RequestBody = Array.Empty<byte>();
+            RequestBodyDropped = true;
+        }
+        if (ResponseBody.Length > 0)
+        {
+            droppedResponseSize = ResponseBody.Length;
+            ResponseBody = Array.Empty<byte>();
+            BodiesDropped = true;
+        }
+    }
     public string DisplayUrl => Method == "CONNECT" ? Host : Url;
     public string Category => Categories.Of(this);
 
