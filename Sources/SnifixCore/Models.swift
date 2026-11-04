@@ -95,6 +95,11 @@ public struct ClientInfo: Sendable, Codable, Hashable {
     public var appName: String?
     public var bundlePath: String?
     public var deviceName: String?
+
+    public init(address: String, port: Int, isLocal: Bool, appName: String? = nil, bundlePath: String? = nil, deviceName: String? = nil) {
+        self.address = address; self.port = port; self.isLocal = isLocal
+        self.appName = appName; self.bundlePath = bundlePath; self.deviceName = deviceName
+    }
 }
 
 public enum FlowState: Sendable, Codable, Hashable {

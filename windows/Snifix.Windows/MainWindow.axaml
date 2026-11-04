@@ -62,6 +62,24 @@
       <Border x:Name="ErrorBanner" DockPanel.Dock="Top" Background="#2A1416" Padding="12,8" IsVisible="False">
         <TextBlock x:Name="ErrorText" Foreground="#FF8A80" TextWrapping="Wrap"/>
       </Border>
+      <ItemsControl x:Name="AccessBanners" DockPanel.Dock="Top">
+        <ItemsControl.ItemTemplate>
+          <DataTemplate>
+            <Border Background="#2A2210" BorderBrush="#66FFCC33" BorderThickness="0,0,0,1" Padding="12,8">
+              <Grid ColumnDefinitions="*,Auto,Auto">
+                <StackPanel VerticalAlignment="Center">
+                  <TextBlock FontWeight="SemiBold" Foreground="#FFD27A">
+                    <Run Text="{Binding Value}"/><Run Text=" at "/><Run Text="{Binding Key}"/><Run Text=" wants to use Snifix"/>
+                  </TextBlock>
+                  <TextBlock FontSize="11.5" Foreground="#8D879C" Text="Allow it only if it is your device. Until then its requests are refused."/>
+                </StackPanel>
+                <Button Grid.Column="1" Classes="tool" Margin="12,0,6,0" Content="Deny" Tag="{Binding Key}" Click="OnDenyDevice"/>
+                <Button Grid.Column="2" Classes="tool gold" Content="Allow" Tag="{Binding Key}" Click="OnAllowDevice"/>
+              </Grid>
+            </Border>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
       <Border x:Name="CertBanner" DockPanel.Dock="Top" Background="#2A2210" Padding="12,8" IsVisible="False">
         <Grid ColumnDefinitions="*,Auto">
           <TextBlock VerticalAlignment="Center" TextWrapping="Wrap" Foreground="#FFD27A"

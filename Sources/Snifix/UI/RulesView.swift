@@ -256,6 +256,29 @@ struct RuleListView: View {
         model.rules.rules = all
     }
 
+    static func confirmImport(_ doc: RulesDocument) -> Bool {
+        var lines: [String] = []
+        for r in doc.rules where r.kind == .mapLocal && r.mapLocal.source != .inline {
+            lines.append("• Map Local “\(r.name)” serves \(r.mapLocal.source == .directory ? "the folder" : "the file") \(r.mapLocal.path) for \(r.matcher.pattern)")
+        }
+        for r in doc.rules where r.kind == .mapRemote {
+            let target = [r.mapRemote.scheme, r.mapRemote.host, r.mapRemote.port.map(String.init) ?? "", r.mapRemote.path].filter { !$0.isEmpty }.joined(separator: " ")
+            lines.append("• Map Remote “\(r.name)” sends \(r.matcher.pattern) to \(target.isEmpty ? "the same server" : target)")
+        }
+        let scripts = doc.rules.filter { $0.kind == .script }.count
+        if scripts > 0 { lines.append("• \(scripts) script\(scripts == 1 ? "" : "s") that can change requests and responses") }
+        if !doc.sslBypass.isEmpty { lines.append("• SSL Bypass hosts: \(doc.sslBypass.joined(separator: ", "))") }
+        let alert = NSAlert()
+        alert.messageText = "Import \(doc.rules.count) rule\(doc.rules.count == 1 ? "" : "s")?"
+        alert.informativeText = (lines.isEmpty ? "" : "Check what these rules do — import only files you trust:\n\n" + lines.prefix(12).joined(separator: "\n")
+            + (lines.count > 12 ? "\n…and \(lines.count - 12) more" : "") + "\n\n")
+            + "All imported rules are added turned off."
+        alert.alertStyle = lines.isEmpty ? .informational : .warning
+        alert.addButton(withTitle: "Import")
+        alert.addButton(withTitle: "Cancel")
+        return alert.runModal() == .alertFirstButtonReturn
+    }
+
     private func exportRules() {
         let panel = NSSavePanel()
         panel.nameFieldStringValue = "Snifix \(tool.title).json"
@@ -281,6 +304,8 @@ struct RuleListView: View {
             model.showToast("This file does not look like Snifix rules", symbol: "exclamationmark.triangle.fill")
             return
         }
+        // Someone else's file can point Map Local at private files or send traffic to their server: show it first
+        guard Self.confirmImport(doc) else { return }
         var groupMap: [UUID: UUID] = [:]
         for g in doc.groups {
             var ng = g
@@ -291,11 +316,12 @@ struct RuleListView: View {
         for r in doc.rules {
             var nr = r
             nr.id = UUID()
+            nr.enabled = false
             nr.groupID = r.groupID.flatMap { groupMap[$0] }
             model.rules.rules.append(nr)
         }
         for h in doc.sslBypass where !model.rules.sslBypass.contains(h) { model.rules.sslBypass.append(h) }
-        model.showToast("Imported \(doc.rules.count) rules")
+        model.showToast("Imported \(doc.rules.count) rules — turned off, check them and turn on the ones you need")
     }
 }
 

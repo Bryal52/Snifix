@@ -17,6 +17,10 @@ struct MainView: View {
                     ErrorBanner(text: error)
                         .transition(.move(edge: .top).combined(with: .opacity))
                 }
+                ForEach(model.accessRequests.sorted(by: { $0.key < $1.key }), id: \.key) { address, name in
+                    AccessRequestBanner(address: address, name: name)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
                 ForEach(model.untrustedDevices.sorted(by: { $0.key < $1.key }), id: \.key) { address, name in
                     UntrustedBanner(address: address, name: name)
                         .transition(.move(edge: .top).combined(with: .opacity))
@@ -68,6 +72,34 @@ struct ErrorBanner: View {
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
         .background(Color.red.opacity(0.12))
+    }
+}
+
+/// Another device on the network wants to use the proxy; nothing goes through until the user allows it.
+struct AccessRequestBanner: View {
+    let address: String
+    let name: String
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            Image(systemName: name == "Android" ? "candybarphone" : name == "Device" ? "network" : "iphone")
+                .font(.system(size: 20))
+                .foregroundStyle(Theme.goldGradient)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("\(name == "Device" ? "A device" : name) at \(address) wants to use Snifix")
+                    .font(.system(size: 12.5, weight: .semibold))
+                Text("Allow it only if it is your device. Until then its requests are refused.")
+                    .font(.system(size: 11.5)).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button("Deny") { model.denyDevice(address) }
+            Button("Allow") { model.allowDevice(address) }
+                .buttonStyle(.borderedProminent).tint(Theme.amber)
+        }
+        .padding(.horizontal, 14).padding(.vertical, 10)
+        .background(Theme.gold.opacity(0.10))
+        .overlay(alignment: .bottom) { Rectangle().fill(Theme.gold.opacity(0.35)).frame(height: 1) }
     }
 }
 
@@ -292,7 +324,6 @@ struct StatusBar: View {
                 Label("Certificate not installed on this Mac", systemImage: "exclamationmark.shield").foregroundStyle(Theme.amber)
             }
             Spacer()
-            Sparkline(values: model.flowsPerSecond).frame(width: 90, height: 14)
             Text("\(model.visibleRows.count) of \(model.rows.count)").monospacedDigit()
                 .contentTransition(.numericText())
             DonateButton(isPresented: Binding(get: { model.showDonate }, set: { model.showDonate = $0 }))

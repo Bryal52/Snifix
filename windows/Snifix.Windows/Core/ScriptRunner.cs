@@ -15,7 +15,7 @@ public sealed class ScriptRunner
     {
         try
         {
-            var engine = new Engine(o => o.TimeoutInterval(TimeSpan.FromSeconds(2)).LimitRecursion(256));
+            var engine = new Engine(o => o.TimeoutInterval(TimeSpan.FromSeconds(2)).LimitRecursion(256).LimitMemory(64_000_000));
             engine.SetValue("__log", new Action<string>(line => log($"[{rule.Name}] {line}")));
             engine.Execute("""
                 var console = { log: function () {

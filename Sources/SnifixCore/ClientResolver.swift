@@ -110,6 +110,20 @@ public enum NetworkInfo {
         return result
     }
 
+    /// Local network ranges: home and office Wi-Fi, link-local, carrier-grade NAT (also used by VPNs like Tailscale).
+    public static func isPrivate(_ address: String) -> Bool {
+        let a = address.lowercased()
+        if a.contains(":") { return a.hasPrefix("fe80:") || a.hasPrefix("fc") || a.hasPrefix("fd") || a == "::1" }
+        let p = a.split(separator: ".").compactMap { Int($0) }
+        guard p.count == 4 else { return false }
+        switch (p[0], p[1]) {
+        case (10, _), (127, _), (192, 168), (169, 254): return true
+        case (172, 16...31): return true
+        case (100, 64...127): return true
+        default: return false
+        }
+    }
+
     /// The address phones on the same network should use (en0/en1 first).
     public static func primaryAddress() -> String? {
         var ifaddr: UnsafeMutablePointer<ifaddrs>?

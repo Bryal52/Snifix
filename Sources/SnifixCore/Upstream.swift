@@ -101,9 +101,7 @@ final class UpstreamPool {
                 channel.eventLoop.makeCompletedFuture {
                     let ops = channel.pipeline.syncOperations
                     guard tls else { return }
-                    let isIP = sniHost.allSatisfy { $0.isNumber || $0 == "." || $0 == ":" }
-                    try ops.addHandler(NIOSSLClientHandler(context: engine.clientTLSContext(allowH2: allowH2),
-                                                           serverHostname: isIP ? nil : sniHost))
+                    try ops.addHandler(AppleTrust.clientHandler(context: engine.clientTLSContext(allowH2: allowH2), host: sniHost))
                     try ops.addHandler(ApplicationProtocolNegotiationHandler { alpn, channel in
                         if case .negotiated("h2") = alpn {
                             return channel.configureHTTP2Pipeline(mode: .client, initialLocalSettings: h2Settings,
@@ -274,6 +272,11 @@ final class ResponseCollector: ChannelInboundHandler, RemovableChannelHandler {
             if h.status.code >= 100 && h.status.code < 200 { return }
             head = h
         case .body(var b):
+            if body.readableBytes + b.readableBytes > ProxyLimits.maxBody {
+                fail(UpstreamError.tooLarge)
+                context.close(promise: nil)
+                return
+            }
             body.writeBuffer(&b)
         case .end(let trailers):
             guard let h = head, let p = promise else { return }
@@ -305,7 +308,7 @@ final class ResponseCollector: ChannelInboundHandler, RemovableChannelHandler {
 /// Large flow-control windows: with the 64 KB default a big response needs a round trip per 64 KB.
 let h2WindowSize = 8 * 1024 * 1024
 let h2Settings: [HTTP2Setting] = [
-    HTTP2Setting(parameter: .maxConcurrentStreams, value: 256),
+    HTTP2Setting(parameter: .maxConcurrentStreams, value: 100),
     HTTP2Setting(parameter: .maxHeaderListSize, value: 256 * 1024),
     HTTP2Setting(parameter: .initialWindowSize, value: h2WindowSize),
 ]

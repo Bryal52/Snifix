@@ -1,6 +1,16 @@
 import Foundation
 import SnifixCore
 
+func resolve(_ host: String) -> String {
+    var info: UnsafeMutablePointer<addrinfo>?
+    var hints = addrinfo(); hints.ai_family = AF_INET
+    guard getaddrinfo(host, nil, &hints, &info) == 0, let first = info?.pointee.ai_addr else { return "0.0.0.0" }
+    defer { freeaddrinfo(info) }
+    var buf = [CChar](repeating: 0, count: 64)
+    getnameinfo(first, socklen_t(first.pointee.sa_len), &buf, 64, nil, 0, NI_NUMERICHOST)
+    return String(cString: buf)
+}
+
 // End-to-end check of the proxy: real requests through curl, with and without rules.
 
 final class PrintSink: FlowSink, @unchecked Sendable {
@@ -135,8 +145,81 @@ func curlNoCA(_ url: String, proxy: String = "127.0.0.1") -> Int32 {
 check("Пиннинг: первый запрос отклонён клиентом", curlNoCA("https://www.wikipedia.org/") != 0)
 Thread.sleep(forTimeInterval: 0.3)
 check("Пиннинг: хост пропускается без расшифровки", curlNoCA("https://www.wikipedia.org/") == 0)
-// A new device (other address) that has not trusted the CA: every host fails
+// Another device on the network: refused until allowed, never reaches this computer's localhost
 let lan = NetworkInfo.primaryAddress() ?? "127.0.0.1"
+var asked: [String] = []
+engine.onAccessRequest = { address, _ in asked.append(address) }
+if lan != "127.0.0.1" && NetworkInfo.isPrivate(lan) {
+    // The Mac's own LAN address counts as this computer, so pretend it is another device
+    var s2 = engine.settings; s2.remoteAccess = .ask; engine.settings = s2
+    let remote = ClientInfo(address: "192.168.77.7", port: 1, isLocal: false)
+    check("Unknown device is refused", !engine.allowsForTest(remote))
+    Thread.sleep(forTimeInterval: 0.1)
+    check("User is asked about it", asked.contains("192.168.77.7"))
+    s2.approvedClients = ["192.168.77.7"]; engine.settings = s2
+    check("Allowed device passes", engine.allowsForTest(remote))
+    check("Internet address never passes", !engine.allowsForTest(ClientInfo(address: "8.8.8.8", port: 1, isLocal: false)))
+    s2.remoteAccess = .never; engine.settings = s2
+    check("\"Nobody\" refuses even allowed devices", !engine.allowsForTest(remote))
+    s2.remoteAccess = .always; engine.settings = s2
+}
+check("Localhost is off limits for other devices", ProxyLimitsForTest.isLoopback("127.0.0.1") && ProxyLimitsForTest.isLoopback("localhost") && !ProxyLimitsForTest.isLoopback("192.168.1.5"))
+
+// Map Local from a folder: nothing outside the folder
+let mocks = dir.appendingPathComponent("mocks")
+try FileManager.default.createDirectory(at: mocks.appendingPathComponent("users"), withIntermediateDirectories: true)
+try Data(#"{"id":42}"#.utf8).write(to: mocks.appendingPathComponent("users/42.json"))
+try Data("secret".utf8).write(to: dir.appendingPathComponent("secret.txt"))
+try? FileManager.default.createSymbolicLink(at: mocks.appendingPathComponent("link"), withDestinationURL: dir.appendingPathComponent("secret.txt"))
+var folder = Rule(name: "Folder", kind: .mapLocal, matcher: RuleMatcher(pattern: "https://example.com/api/*"))
+folder.mapLocal.source = .directory
+folder.mapLocal.path = mocks.path
+engine.rules.rules.insert(folder, at: 0)
+(out, _) = curl(["https://example.com/api/users/42"])
+check("Map Local folder serves its files", out.contains(#""id":42"#), out)
+(out, _) = curl(["https://example.com/api/%2E%2E/secret.txt"])
+check("Map Local folder blocks ..", !out.contains("secret") || out.contains("not found"), out)
+(out, _) = curl(["https://example.com/api/link"])
+check("Map Local folder blocks symlinks out", !out.contains("\r\n\r\nsecret"), out)
+engine.rules.rules.removeAll { $0.name == "Folder" }
+
+// A script stuck in a loop is stopped instead of hanging requests
+var loop = Rule(name: "Loop", kind: .script, matcher: RuleMatcher(pattern: "https://httpbin.org/uuid"))
+loop.script = "function onResponse(c,u,q,r){ while(true){} }"
+engine.rules.rules.append(loop)
+let started = Date()
+(out, code) = curl(["https://httpbin.org/uuid"])
+check("Endless script is stopped", code == 0 && out.contains("200") && Date().timeIntervalSince(started) < 15, "\(Date().timeIntervalSince(started))s \(out.prefix(80))")
+engine.rules.rules.removeAll { $0.name == "Loop" }
+
+// Encryption
+let sealedSession = try PasswordSeal.seal(Data("tokens".utf8), password: "qwerty")
+check("Session encrypted", PasswordSeal.isSealed(sealedSession) && !String(decoding: sealedSession, as: UTF8.self).contains("tokens"))
+check("Session opens with the password", (try? PasswordSeal.open(sealedSession, password: "qwerty")) == Data("tokens".utf8))
+check("Wrong password fails", (try? PasswordSeal.open(sealedSession, password: "nope")) == nil)
+struct TestProtector: KeyProtector {
+    func seal(_ plain: Data) throws -> Data { Data(plain.map { $0 ^ 0x5A }) }
+    func open(_ sealed: Data) throws -> Data { Data(sealed.map { $0 ^ 0x5A }) }
+}
+let caDir = dir.appendingPathComponent("ca-migration")
+let plainCA = try CertificateAuthority(directory: caDir, name: "Snifix Self-Test CA")
+let migrated = try CertificateAuthority(directory: caDir, protector: TestProtector())
+check("Plain CA key moved to the encrypted file", !FileManager.default.fileExists(atPath: caDir.appendingPathComponent("snifix-ca-key.pem").path)
+      && FileManager.default.fileExists(atPath: caDir.appendingPathComponent("snifix-ca-key.sealed").path))
+check("Same CA after encryption", migrated.fingerprint == plainCA.fingerprint)
+struct BrokenProtector: KeyProtector {
+    func seal(_ plain: Data) throws -> Data { throw KeychainError(status: -25293) }
+    func open(_ sealed: Data) throws -> Data { throw KeychainError(status: -25293) }
+}
+check("A locked key is an error, not a new CA", (try? CertificateAuthority(directory: caDir, protector: BrokenProtector())) == nil)
+
+// Servers addressed by IP: the certificate must be issued for that IP
+(out, code) = curl(["-o", "/dev/null", "-w", "%{http_code}", "https://1.1.1.1/"])
+check("IP with a matching certificate works", code == 0 && !out.hasSuffix("502"), out)
+(out, code) = curl(["https://\(resolve("www.google.com"))/"])
+check("IP with someone else's certificate is refused", out.contains("502") && out.contains("failed verification"), String(out.prefix(300)))
+
+// A new device (other address) that has not trusted the CA: every host fails
 _ = curlNoCA("https://www.example.org/", proxy: lan)
 _ = curlNoCA("https://www.wikipedia.org/", proxy: lan)
 Thread.sleep(forTimeInterval: 0.3)

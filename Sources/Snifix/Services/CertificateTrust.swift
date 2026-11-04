@@ -21,7 +21,12 @@ enum CertificateTrust {
         guard status == errSecSuccess || status == errSecDuplicateItem else {
             return "Could not add the certificate to the keychain (\(status))"
         }
-        let trust = SecTrustSettingsSetTrustSettings(cert, .user, nil)
+        // Trusted for TLS only, not for code signing, mail or anything else
+        let sslOnly: [[String: Any]] = [[
+            kSecTrustSettingsPolicy as String: SecPolicyCreateSSL(true, nil),
+            kSecTrustSettingsResult as String: SecTrustSettingsResult.trustRoot.rawValue,
+        ]]
+        let trust = SecTrustSettingsSetTrustSettings(cert, .user, sslOnly as CFArray)
         if trust == errSecSuccess { return nil }
         if trust == errAuthorizationCanceled || trust == errSecAuthFailed { return "Cancelled" }
         return "macOS did not allow trusting the certificate (\(trust))"

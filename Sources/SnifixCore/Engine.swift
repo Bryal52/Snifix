@@ -17,7 +17,13 @@ public struct ProxySettings: Codable, Sendable, Equatable {
     public var maxFlows = 20000
     /// HTTP/2 with clients and servers (ALPN); off means HTTP/1.1 everywhere.
     public var http2 = true
+    /// Who else on the network may use the proxy: ask for each new device, everyone on the local network, or nobody.
+    public var remoteAccess: RemoteAccess = .ask
+    /// Addresses of devices the user allowed.
+    public var approvedClients: [String] = []
     public init() {}
+
+    public enum RemoteAccess: String, Codable, CaseIterable, Sendable { case ask, always, never }
 
     public enum IPhoneMode: String, Codable, CaseIterable, Sendable { case always, usbOnly, off }
 
@@ -33,6 +39,8 @@ public struct ProxySettings: Codable, Sendable, Equatable {
         androidAutoConnect = try c.decodeIfPresent(Bool.self, forKey: .androidAutoConnect) ?? d.androidAutoConnect
         maxFlows = try c.decodeIfPresent(Int.self, forKey: .maxFlows) ?? d.maxFlows
         http2 = try c.decodeIfPresent(Bool.self, forKey: .http2) ?? d.http2
+        remoteAccess = try c.decodeIfPresent(RemoteAccess.self, forKey: .remoteAccess) ?? d.remoteAccess
+        approvedClients = try c.decodeIfPresent([String].self, forKey: .approvedClients) ?? d.approvedClients
     }
 }
 
@@ -70,6 +78,9 @@ public final class ProxyEngine: @unchecked Sendable {
     private let state: NIOLockedValueBox<(rules: RulesDocument, settings: ProxySettings, recording: Bool)>
     private let nextID = NIOLockedValueBox(1)
     private let trust = NIOLockedValueBox(TrustState())
+    private let access = NIOLockedValueBox<(denied: Set<String>, asked: Set<String>)>(([], []))
+    /// Called once per unknown device that tries to use the proxy while access is set to "ask".
+    public var onAccessRequest: (@Sendable (_ address: String, _ device: String?) -> Void)?
     private let tlsClientContexts = NIOLockedValueBox<[String: NIOSSLContext]>([:])
 
     public var breakpointHandler: (@Sendable (BreakpointEvent) async -> BreakpointDecision)?
@@ -140,6 +151,36 @@ public final class ProxyEngine: @unchecked Sendable {
     }
 
     // MARK: - Decisions used by the pipeline
+
+    /// Whether a client may use the proxy. This computer and Android over USB always may;
+    /// other devices must be on the local network and, in "ask" mode, allowed by the user.
+    func allows(_ client: ClientInfo, userAgent: String?) -> Bool {
+        if client.isLocal || client.address == "USB" { return true }
+        guard NetworkInfo.isPrivate(client.address) else { return false }
+        let s = settings
+        switch s.remoteAccess {
+        case .always: return true
+        case .never: return false
+        case .ask:
+            if s.approvedClients.contains(client.address) { return true }
+            let first = access.withLockedValue { a -> Bool in
+                if a.denied.contains(client.address) || a.asked.contains(client.address) { return false }
+                a.asked.insert(client.address)
+                return true
+            }
+            if first { onAccessRequest?(client.address, ClientResolver.deviceName(fromUserAgent: userAgent, isLocal: false)) }
+            return false
+        }
+    }
+
+    public func denyClient(_ address: String) {
+        access.withLockedValue { _ = $0.denied.insert(address) }
+    }
+
+    /// Forgets earlier answers, so the device is asked about again on its next request.
+    public func forgetClient(_ address: String) {
+        access.withLockedValue { $0.denied.remove(address); $0.asked.remove(address) }
+    }
 
     func shouldDecrypt(host: String, client: String) -> Bool {
         let (rules, settings, _) = state.withLockedValue { $0 }
@@ -380,10 +421,12 @@ enum ProxyErrors {
 enum UpstreamError: Error {
     case closed(beforeResponse: Bool)
     case timeout
+    case tooLarge
     var message: String {
         switch self {
         case .closed: return "The server closed the connection without a response"
         case .timeout: return "The server did not respond within 120 seconds"
+        case .tooLarge: return "The response is larger than 256 MB — Snifix does not keep bodies this big"
         }
     }
 }
@@ -394,4 +437,30 @@ struct TrustState {
     var rejected: [String: Set<String>] = [:]
     var accepted: Set<String> = []
     var alerted: Set<String> = []
+}
+
+enum ProxyLimits {
+    /// Largest request or response body Snifix keeps in memory.
+    static let maxBody = 256 * 1024 * 1024
+
+    /// Other devices must not reach services that listen only on this computer.
+    static func isLoopback(_ host: String) -> Bool {
+        let h = host.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+        return h == "localhost" || h.hasSuffix(".localhost") || h.hasPrefix("127.") || h == "::1" || h == "0.0.0.0" || h == "::"
+    }
+
+    static func refusal(_ message: String, status: Int = 403) -> ResponseData {
+        ResponseData(statusCode: status, headers: [HTTPHeader("Content-Type", "text/plain; charset=utf-8")],
+                     body: Data("Snifix: \(message)\n".utf8))
+    }
+
+    static let notAllowed = "this device is not allowed to use the proxy. Allow it in Snifix on the computer (a banner appears there), then try again."
+}
+
+// Used by snifix-selftest
+extension ProxyEngine {
+    public func allowsForTest(_ client: ClientInfo) -> Bool { allows(client, userAgent: nil) }
+}
+public enum ProxyLimitsForTest {
+    public static func isLoopback(_ host: String) -> Bool { ProxyLimits.isLoopback(host) }
 }

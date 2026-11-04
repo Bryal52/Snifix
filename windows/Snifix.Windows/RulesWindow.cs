@@ -480,6 +480,35 @@ public sealed class RulesWindow : Window
         state.ShowToast($"Exported {doc.Rules.Count} rules");
     }
 
+    async Task<bool> ConfirmImport(RulesDocument doc)
+    {
+        var lines = new List<string>();
+        foreach (var r in doc.Rules.Where(r => r.Kind == RuleKind.mapLocal && r.MapLocal.Source != MapLocalSource.inline))
+            lines.Add($"• Map Local “{r.Name}” serves {(r.MapLocal.Source == MapLocalSource.directory ? "the folder" : "the file")} {r.MapLocal.Path} for {r.Matcher.Pattern}");
+        foreach (var r in doc.Rules.Where(r => r.Kind == RuleKind.mapRemote))
+            lines.Add($"• Map Remote “{r.Name}” sends {r.Matcher.Pattern} to {string.Join(" ", new[] { r.MapRemote.Scheme, r.MapRemote.Host, r.MapRemote.Port?.ToString() ?? "", r.MapRemote.Path }.Where(x => x != ""))}");
+        var scripts = doc.Rules.Count(r => r.Kind == RuleKind.script);
+        if (scripts > 0) lines.Add($"• {scripts} script(s) that can change requests and responses");
+        if (doc.SslBypass.Count > 0) lines.Add("• SSL Bypass hosts: " + string.Join(", ", doc.SslBypass));
+        var text = (lines.Count == 0 ? "" : "Check what these rules do — import only files you trust:\n\n" + string.Join("\n", lines.Take(12)) + "\n\n")
+                   + "All imported rules are added turned off.";
+        var result = false;
+        var dialog = new Window { Title = $"Import {doc.Rules.Count} rules?", Width = 560, SizeToContent = SizeToContent.Height, CanResize = false,
+                                  WindowStartupLocation = WindowStartupLocation.CenterOwner };
+        var import = Ui.Button("Import", () => { result = true; dialog.Close(); }, gold: true);
+        var cancel = Ui.Button("Cancel", () => dialog.Close());
+        var buttons = Ui.Row(cancel, import);
+        buttons.HorizontalAlignment = HorizontalAlignment.Right;
+        var body = Ui.Column(14);
+        body.Margin = new Thickness(20);
+        body.Children.Add(new TextBlock { Text = $"Import {doc.Rules.Count} rules?", FontSize = 16, FontWeight = FontWeight.SemiBold });
+        body.Children.Add(Ui.Text(text, 12.5, lines.Count > 0 ? "#FFD27A" : "#B9B5C6"));
+        body.Children.Add(buttons);
+        dialog.Content = body;
+        await dialog.ShowDialog(this);
+        return result;
+    }
+
     async Task Import()
     {
         var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions { AllowMultiple = false });
@@ -488,12 +517,14 @@ public sealed class RulesWindow : Window
         {
             await using var s = await files[0].OpenReadAsync();
             var doc = await JsonSerializer.DeserializeAsync<RulesDocument>(s, Json.Options) ?? throw new Exception();
+            // Someone else's file can point Map Local at private files or send traffic to their server: show it first
+            if (!await ConfirmImport(doc)) return;
             var map = new Dictionary<Guid, Guid>();
             foreach (var g in doc.Groups) { var id = Guid.NewGuid(); map[g.Id] = id; g.Id = id; state.Rules.Groups.Add(g); }
-            foreach (var r in doc.Rules) { r.Id = Guid.NewGuid(); r.GroupId = r.GroupId is Guid old && map.TryGetValue(old, out var n) ? n : null; state.Rules.Rules.Add(r); }
+            foreach (var r in doc.Rules) { r.Id = Guid.NewGuid(); r.Enabled = false; r.GroupId = r.GroupId is Guid old && map.TryGetValue(old, out var n) ? n : null; state.Rules.Rules.Add(r); }
             Save();
             Reload();
-            state.ShowToast($"Imported {doc.Rules.Count} rules");
+            state.ShowToast($"Imported {doc.Rules.Count} rules — turned off, check them and turn on the ones you need");
         }
         catch { state.ShowToast("This file does not look like Snifix rules"); }
     }

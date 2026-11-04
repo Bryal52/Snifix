@@ -25,6 +25,10 @@ public sealed class ProxySettings
     /// "always" — phones using the PAC address go through Snifix; "off" — the PAC says DIRECT.
     public string PhoneMode { get; set; } = "always";
     public int MaxFlows { get; set; } = 20000;
+    /// Who else on the network may use the proxy: "ask" for each new device, "always" on the local network, or "never".
+    public string RemoteAccess { get; set; } = "ask";
+    /// Addresses of devices the user allowed.
+    public List<string> ApprovedClients { get; set; } = new();
 }
 
 /// The proxy: decrypts HTTPS, applies the rules and reports every request as a Flow.
@@ -66,7 +70,9 @@ public sealed class ProxyEngine : IDisposable
         cm.RootCertificateIssuerName = "Snifix";
         cm.PfxFilePath = Path.Combine(dataDirectory, "snifix-ca.pfx");
         cm.CertificateEngine = CertificateEngine.BouncyCastle;
-        if (File.Exists(cm.PfxFilePath)) cm.LoadRootCertificate();
+        var created = KeyVault.PreparePfx(dataDirectory, cm.PfxFilePath, out var password);
+        cm.PfxPassword = password;
+        if (!created && File.Exists(cm.PfxFilePath)) cm.LoadRootCertificate();
         if (cm.RootCertificate == null) cm.CreateRootCertificate(true);
         File.WriteAllText(Path.Combine(dataDirectory, "snifix-ca.pem"), cm.RootCertificate!.ExportCertificatePem());
 
@@ -80,6 +86,7 @@ public sealed class ProxyEngine : IDisposable
         server.EnableHttp2 = Settings.Http2;
         server.IgnoreServerCertificateErrors = !Settings.VerifyServerCertificates;
         server.EnableDecryptFailureBypass = Settings.AutoBypassPinned;
+        server.MaxBufferedBodyBytes = 256 * 1024 * 1024;
         endPoint = new ExplicitProxyEndPoint(IPAddress.Any, Settings.Port, Settings.DecryptHttps);
         endPoint.BeforeTunnelConnectRequest += OnTunnel;
         server.AddEndPoint(endPoint);
@@ -170,11 +177,83 @@ public sealed class ProxyEngine : IDisposable
         return set;
     }
 
+    // MARK: - Who may use the proxy
+
+    const string NotAllowed = "this device is not allowed to use the proxy. Allow it in Snifix on the computer (a banner appears there), then try again.";
+    readonly HashSet<string> denied = new(), asked = new();
+    /// Called once per unknown device that tries to use the proxy while access is "ask".
+    public event Action<string, string?>? AccessRequested;
+
+    static IPAddress? Remote(SessionEventArgsBase e)
+    {
+        var a = e.ClientRemoteEndPoint?.Address;
+        return a != null && a.IsIPv4MappedToIPv6 ? a.MapToIPv4() : a;
+    }
+
+    static bool IsLocalClient(SessionEventArgsBase e) =>
+        Remote(e) is IPAddress a && (IPAddress.IsLoopback(a) || LocalAddresses().Contains(a.ToString()));
+
+    public static bool IsPrivate(IPAddress a)
+    {
+        if (a.AddressFamily == AddressFamily.InterNetworkV6) return a.IsIPv6LinkLocal || a.IsIPv6UniqueLocal || IPAddress.IsLoopback(a);
+        var b = a.GetAddressBytes();
+        return b[0] == 10 || b[0] == 127 || (b[0] == 192 && b[1] == 168) || (b[0] == 169 && b[1] == 254)
+               || (b[0] == 172 && b[1] >= 16 && b[1] <= 31) || (b[0] == 100 && b[1] >= 64 && b[1] <= 127);
+    }
+
+    public static bool IsLoopback(string host)
+    {
+        var h = host.ToLowerInvariant().Trim('[', ']');
+        return h == "localhost" || h.EndsWith(".localhost") || h.StartsWith("127.") || h == "::1" || h == "0.0.0.0" || h == "::";
+    }
+
+    /// This computer always may; other devices must be on the local network and, in "ask" mode, allowed by the user.
+    bool Allows(SessionEventArgsBase e)
+    {
+        if (IsLocalClient(e)) return true;
+        if (Remote(e) is not IPAddress a || !IsPrivate(a)) return false;
+        var address = a.ToString();
+        switch (Settings.RemoteAccess)
+        {
+            case "always": return true;
+            case "never": return false;
+        }
+        if (Settings.ApprovedClients.Contains(address)) return true;
+        bool first;
+        lock (asked) { first = !denied.Contains(address) && asked.Add(address); }
+        if (first) AccessRequested?.Invoke(address, Clients.DeviceName(e.HttpClient.Request.Headers.GetFirstHeader("User-Agent")?.Value));
+        return false;
+    }
+
+    public void DenyClient(string address) { lock (asked) denied.Add(address); }
+    public void ForgetClient(string address) { lock (asked) { denied.Remove(address); asked.Remove(address); } }
+
+    static void Refuse(SessionEventArgs e, string message) =>
+        e.GenericResponse(Encoding.UTF8.GetBytes($"Snifix: {message}\n"), HttpStatusCode.Forbidden,
+            new Dictionary<string, HttpHeader> { ["Content-Type"] = new("Content-Type", "text/plain; charset=utf-8") }, true);
+
+    bool SignedBySnifix(X509Certificate cert)
+    {
+        using var chain = new X509Chain();
+        chain.ChainPolicy.TrustMode = X509ChainTrustMode.CustomRootTrust;
+        chain.ChainPolicy.CustomTrustStore.Add(RootCertificate);
+        chain.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
+        return chain.Build(new X509Certificate2(cert));
+    }
+
+    /// SHA-256 of the certificate, as iOS and Android show it in the certificate details.
+    public string Fingerprint => string.Join(" ", System.Security.Cryptography.SHA256.HashData(RootCertificate.RawData).Select(b => b.ToString("X2")));
+
     // MARK: - Tunnels
 
     Task OnTunnel(object sender, TunnelConnectSessionEventArgs e)
     {
         var host = e.HttpClient.Request.RequestUri.Host;
+        if (!Allows(e) || (!IsLocalClient(e) && IsLoopback(host)))
+        {
+            e.DenyConnect = true;
+            return Task.CompletedTask;
+        }
         if (!Settings.DecryptHttps || HostMatch.Matches(host, Rules.SslBypass) ||
             (Rules.AllowListEnabled && !HostMatch.Matches(host, Rules.AllowList)))
         {
@@ -245,6 +324,9 @@ public sealed class ProxyEngine : IDisposable
         var request = e.HttpClient.Request;
         var uri = request.RequestUri;
         if (LocalEndpoint(e, uri)) return;
+        // Inside a decrypted tunnel the client was already checked at CONNECT
+        if (!e.IsHttps && !Allows(e)) { Refuse(e, NotAllowed); return; }
+        if (!IsLocalClient(e) && IsLoopback(uri.Host)) { Refuse(e, "other devices cannot reach this computer's localhost."); return; }
 
         var flow = NewFlow(e, request.Method, uri.ToString());
         e.UserData = flow;
@@ -540,8 +622,9 @@ public sealed class ProxyEngine : IDisposable
             Proxy = new WebProxy($"http://127.0.0.1:{Settings.Port}"),
             UseProxy = true,
             AutomaticDecompression = DecompressionMethods.All,
+            // Requests go through this proxy, so the certificate must be one Snifix itself signed
             ServerCertificateCustomValidationCallback = (_, cert, _, errors) =>
-                errors == System.Net.Security.SslPolicyErrors.None || (cert != null && cert.Issuer.Contains("Snifix")),
+                errors == System.Net.Security.SslPolicyErrors.None || (cert != null && SignedBySnifix(cert)),
         };
         using var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(120) };
         var message = new HttpRequestMessage(new HttpMethod(method), url);
@@ -621,8 +704,11 @@ static class MapLocal
     {
         var dir = Expand(rule.MapLocal.Path);
         var rest = Suffix(rule, flow);
-        if (rest.Contains("..")) return null;
-        var full = rest.Length == 0 ? dir : System.IO.Path.Combine(dir, rest.Replace('/', System.IO.Path.DirectorySeparatorChar));
+        if (rest.Contains("..") || rest.Contains(':') || rest.Contains('\\') || System.IO.Path.IsPathRooted(rest)) return null;
+        var root = System.IO.Path.GetFullPath(dir);
+        var full = System.IO.Path.GetFullPath(rest.Length == 0 ? dir : System.IO.Path.Combine(dir, rest.Replace('/', System.IO.Path.DirectorySeparatorChar)));
+        // Absolute, drive or network paths from the URL must never leave the folder
+        if (full != root && !full.StartsWith(root.TrimEnd(System.IO.Path.DirectorySeparatorChar) + System.IO.Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) return null;
         if (File.Exists(full)) return full;
         if (Directory.Exists(full))
             return new[] { "index.json", "index.html" }.Select(i => System.IO.Path.Combine(full, i)).FirstOrDefault(File.Exists);

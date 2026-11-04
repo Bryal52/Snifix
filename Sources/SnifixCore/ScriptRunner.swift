@@ -1,5 +1,11 @@
 import Foundation
 import JavaScriptCore
+import Darwin
+
+/// JavaScriptCore can stop a script that runs too long, but the switch is not in the public headers.
+private typealias SetTimeLimit = @convention(c) (JSContextGroupRef, Double, OpaquePointer?, UnsafeMutableRawPointer?) -> Void
+private let setTimeLimit: SetTimeLimit? = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "JSContextGroupSetExecutionTimeLimit")
+    .map { unsafeBitCast($0, to: SetTimeLimit.self) }
 
 /// Runs Script rules (onRequest / onResponse) in JavaScriptCore, one context per rule.
 public actor ScriptRunner {
@@ -13,6 +19,8 @@ public actor ScriptRunner {
         if let c = contexts[key] { return c }
         contexts = contexts.filter { !$0.key.hasPrefix(rule.id.uuidString) }
         guard let c = JSContext() else { return nil }
+        // An endless loop must not hang every request that goes through scripts
+        setTimeLimit?(JSContextGetGroup(c.jsGlobalContextRef), 2, nil, nil)
         let name = rule.name
         let log: @convention(block) (JSValue) -> Void = { [weak self] value in
             let text = value.isObject ? (value.toObject().flatMap { try? JSONSerialization.data(withJSONObject: $0) }

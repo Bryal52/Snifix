@@ -109,10 +109,64 @@ struct MacCard: View {
                     }
                 }
             }
+            Divider()
+            NetworkAccessSection()
+            Divider()
             Text("macOS asks for your password — the standard system prompt for trusting a certificate. Firefox has its own store: import snifix-ca.pem in its settings.")
                 .font(.system(size: 11)).foregroundStyle(.secondary)
         }
         .card()
+    }
+}
+
+/// Who else on the network may send traffic through Snifix.
+struct NetworkAccessSection: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Other devices on the network").font(.system(size: 13, weight: .medium))
+            Picker("", selection: Binding(get: { model.settings.remoteAccess }, set: { model.settings.remoteAccess = $0 })) {
+                Text("Ask for each new device").tag(ProxySettings.RemoteAccess.ask)
+                Text("Allow every device on the local network").tag(ProxySettings.RemoteAccess.always)
+                Text("Nobody — only this Mac (and Android over USB)").tag(ProxySettings.RemoteAccess.never)
+            }
+            .pickerStyle(.radioGroup).labelsHidden()
+            Text("Devices from the internet are never allowed, and other devices cannot reach this Mac's localhost through Snifix.")
+                .font(.system(size: 11)).foregroundStyle(.secondary)
+            if !model.settings.approvedClients.isEmpty {
+                Text("Allowed devices").font(.system(size: 11.5, weight: .medium)).padding(.top, 4)
+                ForEach(model.settings.approvedClients, id: \.self) { address in
+                    HStack {
+                        Image(systemName: "checkmark.shield.fill").foregroundStyle(Theme.gold)
+                        Text(address).font(.system(size: 12, design: .monospaced))
+                        Spacer()
+                        Button("Remove") { model.removeApprovedDevice(address) }.buttonStyle(.borderless)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// The certificate is downloaded over plain HTTP, so the phone's copy should be compared with this one.
+struct FingerprintBox: View {
+    let fingerprint: String
+    let hint: String
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Label("Check the certificate", systemImage: "checkmark.seal").font(.system(size: 12.5, weight: .semibold))
+            Text(hint).font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Text(fingerprint)
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .foregroundStyle(Theme.gold)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color.primary.opacity(0.04)))
     }
 }
 
@@ -146,6 +200,8 @@ struct IPhoneCard: View {
                     StepRow(number: 5, text: "General → About → **Certificate Trust Settings** → turn on Snifix CA. Without this step HTTPS is not decrypted. “Not Verified” on the profile is normal.")
                 }
             }
+            FingerprintBox(fingerprint: model.ca.fingerprint,
+                           hint: "The certificate comes over plain Wi-Fi. On the iPhone open Settings → General → VPN & Device Management → Snifix CA → More Details: the SHA-256 fingerprint there must be the same as here. If it differs, do not trust it — someone on the network replaced it.")
             Divider()
             VStack(alignment: .leading, spacing: 8) {
                 Text("When to Capture").font(.system(size: 13, weight: .medium))
@@ -192,6 +248,8 @@ struct AndroidCard: View {
                     StepRow(number: 4, text: "Android 7+ trusts user certificates only if the app allows it (`network_security_config`). Ask the developers to add `<certificates src=\"user\"/>` to the QA build.")
                 }
             }
+            FingerprintBox(fingerprint: model.ca.fingerprint,
+                           hint: "On the phone open Settings → Security → Encryption & credentials → Trusted credentials → User → Snifix CA: the SHA-256 fingerprint must be the same as here.")
             Divider()
             Text("Over USB Cable").font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.gold)
             if model.android.adb == nil {

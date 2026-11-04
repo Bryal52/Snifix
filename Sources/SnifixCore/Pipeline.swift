@@ -55,6 +55,7 @@ final class ExchangeHandler: ChannelInboundHandler, RemovableChannelHandler {
     private var busy = false
     private var context: ChannelHandlerContext?
     private var pool: UpstreamPool?
+    private var tooLarge = false
     private let ownsPool: Bool
     /// One HTTP/2 stream: no Connection headers, no CONNECT or upgrades.
     private let http2: Bool
@@ -86,16 +87,32 @@ final class ExchangeHandler: ChannelInboundHandler, RemovableChannelHandler {
         case .head(let h):
             head = h
             body.clear()
+            tooLarge = false
             if !http2 && h.headers[canonicalForm: "expect"].contains(where: { $0.lowercased() == "100-continue" }) {
                 context.writeAndFlush(wrapOutboundOut(.head(HTTPResponseHead(version: h.version, status: .continue))), promise: nil)
             }
         case .body(var chunk):
-            body.writeBuffer(&chunk)
+            // Past the limit the rest is dropped and the request is answered with 413
+            if body.readableBytes + chunk.readableBytes > ProxyLimits.maxBody { tooLarge = true; body.clear() }
+            if !tooLarge { body.writeBuffer(&chunk) }
         case .end:
             guard let h = head else { return }
             head = nil
             if h.method == .CONNECT && target == nil {
+                let host = String(h.uri.split(separator: ":").dropLast().joined(separator: ":"))
+                if !engine.allows(client, userAgent: h.headers.first(name: "user-agent")) {
+                    refuse(context: context, head: h, ProxyLimits.refusal(ProxyLimits.notAllowed))
+                    return
+                }
+                if !client.isLocal && ProxyLimits.isLoopback(host) {
+                    refuse(context: context, head: h, ProxyLimits.refusal("other devices cannot reach this computer's localhost."))
+                    return
+                }
                 beginTunnel(context: context, head: h)
+                return
+            }
+            if tooLarge {
+                refuse(context: context, head: h, ProxyLimits.refusal("the request body is larger than 256 MB.", status: 413))
                 return
             }
             queue.append((h, body))
@@ -112,6 +129,10 @@ final class ExchangeHandler: ChannelInboundHandler, RemovableChannelHandler {
             self?.busy = false
             self?.processNext()
         }
+    }
+
+    private func refuse(context: ChannelHandlerContext, head: HTTPRequestHead, _ response: ResponseData) {
+        _ = write(response, head: head, close: true, context: context)
     }
 
     // MARK: CONNECT
@@ -147,6 +168,13 @@ final class ExchangeHandler: ChannelInboundHandler, RemovableChannelHandler {
             return write(local, head: head, close: false, context: context)
         }
         if let h = target?.host, request.host != h { request.host = h }
+        // Inside a decrypted tunnel the client was already checked at CONNECT
+        if target == nil && !engine.allows(client, userAgent: request.headers["User-Agent"]) {
+            return write(ProxyLimits.refusal(ProxyLimits.notAllowed), head: head, close: true, context: context)
+        }
+        if !client.isLocal && ProxyLimits.isLoopback(request.host) {
+            return write(ProxyLimits.refusal("other devices cannot reach this computer's localhost."), head: head, close: true, context: context)
+        }
 
         if !http2 && head.headers[canonicalForm: "upgrade"].contains(where: { $0.lowercased() == "websocket" }) {
             WebSocketBridge.start(context: context, head: head, request: request, engine: engine, client: client,

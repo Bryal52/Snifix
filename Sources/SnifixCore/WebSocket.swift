@@ -25,7 +25,7 @@ enum WebSocketBridge {
             .channelInitializer { ch in
                 ch.eventLoop.makeCompletedFuture {
                     let ops = ch.pipeline.syncOperations
-                    if tls { try ops.addHandler(NIOSSLClientHandler(context: engine.clientTLSContext(allowH2: false), serverHostname: sni)) }
+                    if tls { try ops.addHandler(AppleTrust.clientHandler(context: engine.clientTLSContext(allowH2: false), host: sni)) }
                     try ops.addHandler(HTTPRequestEncoder(configuration: .manualFraming), name: "ws-enc")
                     try ops.addHandler(ByteToMessageHandler(HTTPResponseDecoder(leftOverBytesStrategy: .forwardBytes)), name: "ws-dec")
                     try ops.addHandler(collector, name: "ws-collect")
@@ -109,6 +109,7 @@ final class FrameRelay: ChannelInboundHandler, RemovableChannelHandler {
     private let fromClient: Bool
     private let recorder: FlowRecorder?
     private var pending = ByteBuffer()
+    private var tooBig = false
     private static let counter = NSLock()
     private static var nextMessageID = 1
 
@@ -119,8 +120,10 @@ final class FrameRelay: ChannelInboundHandler, RemovableChannelHandler {
     func channelRead(context: ChannelHandlerContext, data: NIOAny) {
         var buffer = unwrapInboundIn(data)
         peer.writeAndFlush(buffer, promise: nil)
-        guard recorder != nil else { return }
+        guard recorder != nil, !tooBig else { return }
         pending.writeBuffer(&buffer)
+        // A frame this large is relayed but no longer parsed for display
+        if pending.readableBytes > 32 * 1024 * 1024 { tooBig = true; pending.clear(); return }
         while let message = parseFrame() {
             recorder?.update {
                 if $0.webSocketMessages.count < 10000 { $0.webSocketMessages.append(message) }

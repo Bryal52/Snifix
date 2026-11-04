@@ -140,7 +140,9 @@ struct SnifixCommands: Commands {
             Button("Open Session…") {
                 let panel = NSOpenPanel()
                 panel.allowedContentTypes = [UTType(filenameExtension: "snifix") ?? .json, .json]
-                if panel.runModal() == .OK, let url = panel.url { model.openSession(url) }
+                if panel.runModal() == .OK, let url = panel.url {
+                    model.openSession(url) { PasswordPrompt.ask(title: "This session is encrypted", message: "Enter its password.", confirm: false) }
+                }
             }
             .keyboardShortcut("o")
             Button("Save Session…") {
@@ -148,8 +150,11 @@ struct SnifixCommands: Commands {
                 panel.nameFieldStringValue = "Session.snifix"
                 if panel.runModal() == .OK, let url = panel.url {
                     let list = model.rows.compactMap { model.flows[$0.id] }
-                    model.saveSession(to: url, flows: list)
-                    model.showToast("Session saved: \(list.count) requests")
+                    guard let password = PasswordPrompt.ask(
+                        title: "Protect the session with a password?",
+                        message: "Sessions contain tokens and personal data. With a password the file is encrypted (AES-256). Leave both fields empty to save without one.",
+                        confirm: true) else { return }
+                    model.saveSession(to: url, flows: list, password: password)
                 }
             }
             .keyboardShortcut("s")
@@ -213,5 +218,33 @@ struct SnifixCommands: Commands {
             openWindow(id: "rules")
         }
         .keyboardShortcut(key.map { KeyEquivalent($0) } ?? KeyEquivalent("\0"), modifiers: key == nil ? [] : [.command, .option])
+    }
+}
+
+/// Small password dialog; nil when cancelled.
+@MainActor
+enum PasswordPrompt {
+    static func ask(title: String, message: String, confirm: Bool) -> String? {
+        while true {
+            let alert = NSAlert()
+            alert.messageText = title
+            alert.informativeText = message
+            alert.addButton(withTitle: confirm ? "Save" : "Open")
+            alert.addButton(withTitle: "Cancel")
+            let first = NSSecureTextField(frame: NSRect(x: 0, y: confirm ? 30 : 0, width: 260, height: 24))
+            first.placeholderString = "Password"
+            let second = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
+            second.placeholderString = "Repeat password"
+            let box = NSView(frame: NSRect(x: 0, y: 0, width: 260, height: confirm ? 54 : 24))
+            box.addSubview(first)
+            if confirm { box.addSubview(second) }
+            alert.accessoryView = box
+            alert.window.initialFirstResponder = first
+            guard alert.runModal() == .alertFirstButtonReturn else { return nil }
+            if !confirm || first.stringValue == second.stringValue { return first.stringValue }
+            let mismatch = NSAlert()
+            mismatch.messageText = "The passwords do not match"
+            mismatch.runModal()
+        }
     }
 }

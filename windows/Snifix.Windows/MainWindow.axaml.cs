@@ -21,6 +21,7 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         Grid.ItemsSource = state.Visible;
+        AccessBanners.ItemsSource = state.AccessRequests;
         SidebarTree.ItemsSource = state.Sidebar;
 
         foreach (var c in Categories.All)
@@ -250,4 +251,6 @@ public partial class MainWindow : Window
     void OnDevices(object? s, RoutedEventArgs e) => DevicesWindow.Open(this);
     void OnDonate(object? s, RoutedEventArgs e) => new DonateWindow().ShowDialog(this);
     void OnTrust(object? s, RoutedEventArgs e) => state.TrustCertificate();
+    void OnAllowDevice(object? s, RoutedEventArgs e) { if ((s as Button)?.Tag is string a) state.AllowDevice(a); }
+    void OnDenyDevice(object? s, RoutedEventArgs e) { if ((s as Button)?.Tag is string a) state.DenyDevice(a); }
 }

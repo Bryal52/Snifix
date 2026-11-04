@@ -282,6 +282,8 @@ final class AppModel {
 
     /// Devices that refuse the Snifix certificate everywhere: address → "iPhone" / "Android" / nil.
     var untrustedDevices: [String: String] = [:]
+    /// Devices on the network that tried to use the proxy and wait for an answer: address → "iPhone" / "Android" / nil.
+    var accessRequests: [String: String] = [:]
     var deviceProfiles: [String: DeviceProfile] = [:] {
         didSet { save(deviceProfiles, "devices.json"); rebuildSummaries() }
     }
@@ -300,7 +302,7 @@ final class AppModel {
             ?? fm.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Snifix")
         try? fm.createDirectory(at: supportDirectory, withIntermediateDirectories: true)
         let testCopy = ProcessInfo.processInfo.environment["SNIFIX_HOME"] != nil
-        ca = try! CertificateAuthority(directory: supportDirectory, name: testCopy ? "Snifix Test CA (not for phones)" : nil)
+        ca = Self.loadCertificateAuthority(directory: supportDirectory, testCopy: testCopy)
         let loadedSettings = Self.load(ProxySettings.self, "settings.json", in: supportDirectory) ?? ProxySettings()
         let loadedRules = Self.load(RulesDocument.self, "rules.json", in: supportDirectory) ?? RulesDocument()
         settings = loadedSettings
@@ -314,6 +316,13 @@ final class AppModel {
         caTrustedOnMac = CertificateTrust.isTrusted(ca.certificateDER)
         deviceProfiles = Self.load([String: DeviceProfile].self, "devices.json", in: supportDirectory) ?? [:]
 
+        engine.onAccessRequest = { [weak self] address, device in
+            Task { @MainActor in
+                guard let self else { return }
+                withAnimation(.spring(response: 0.45, dampingFraction: 0.8)) { self.accessRequests[address] = device ?? "Device" }
+                NSApp.requestUserAttention(.informationalRequest)
+            }
+        }
         engine.onUntrustedClient = { [weak self] address, hint in
             Task { @MainActor in
                 guard let self else { return }
@@ -594,16 +603,39 @@ final class AppModel {
 
     // MARK: - Sessions
 
-    func saveSession(to url: URL, flows list: [FlowData]) {
+    /// Sessions hold tokens and personal data, so they can be saved with a password (AES-256-GCM).
+    func saveSession(to url: URL, flows list: [FlowData], password: String?) {
         let enc = JSONEncoder()
         enc.dateEncodingStrategy = .iso8601
-        if let data = try? enc.encode(list) { try? data.write(to: url) }
+        guard var data = try? enc.encode(list) else { return }
+        if let password, !password.isEmpty {
+            guard let sealed = try? PasswordSeal.seal(data, password: password) else {
+                showToast("Could not encrypt the session", symbol: "exclamationmark.triangle.fill")
+                return
+            }
+            data = sealed
+        }
+        try? data.write(to: url)
+        showToast(password?.isEmpty == false ? "Session saved with a password: \(list.count) requests" : "Session saved: \(list.count) requests",
+                  symbol: password?.isEmpty == false ? "lock.fill" : "checkmark.circle.fill")
     }
 
-    func openSession(_ url: URL) {
+    func openSession(_ url: URL, password: () -> String?) {
         let dec = JSONDecoder()
         dec.dateDecodingStrategy = .iso8601
-        guard let data = try? Data(contentsOf: url), let list = try? dec.decode([FlowData].self, from: data) else {
+        guard var data = try? Data(contentsOf: url) else {
+            showToast("Could not open the session file", symbol: "exclamationmark.triangle.fill")
+            return
+        }
+        if PasswordSeal.isSealed(data) {
+            guard let pw = password() else { return }
+            guard let plain = try? PasswordSeal.open(data, password: pw) else {
+                showToast("Wrong password", symbol: "lock.trianglebadge.exclamationmark.fill")
+                return
+            }
+            data = plain
+        }
+        guard let list = try? dec.decode([FlowData].self, from: data) else {
             showToast("Could not open the session file", symbol: "exclamationmark.triangle.fill")
             return
         }
@@ -730,6 +762,46 @@ final class AppModel {
         change(&p)
         withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
             deviceProfiles[key] = p == DeviceProfile() ? nil : p
+        }
+    }
+
+    func allowDevice(_ address: String) {
+        var s = settings
+        if !s.approvedClients.contains(address) { s.approvedClients.append(address) }
+        settings = s
+        engine.forgetClient(address)
+        withAnimation(.spring(response: 0.45, dampingFraction: 0.8)) { _ = accessRequests.removeValue(forKey: address) }
+        showToast("\(address) may use Snifix — open the app on the device again", symbol: "checkmark.shield.fill")
+    }
+
+    func denyDevice(_ address: String) {
+        engine.denyClient(address)
+        withAnimation(.spring(response: 0.45, dampingFraction: 0.8)) { _ = accessRequests.removeValue(forKey: address) }
+        showToast("\(address) is not allowed until Snifix restarts", symbol: "hand.raised.fill")
+    }
+
+    func removeApprovedDevice(_ address: String) {
+        var s = settings
+        s.approvedClients.removeAll { $0 == address }
+        settings = s
+        engine.forgetClient(address)
+    }
+
+    /// The CA key is encrypted with a key from the Keychain. If macOS does not give it out, Snifix must not
+    /// quietly make a new CA (every phone would stop trusting it), so it asks to try again.
+    private static func loadCertificateAuthority(directory: URL, testCopy: Bool) -> CertificateAuthority {
+        while true {
+            do {
+                return try CertificateAuthority(directory: directory, name: testCopy ? "Snifix Test CA (not for phones)" : nil,
+                                                protector: testCopy ? nil : KeychainKeyProtector())
+            } catch {
+                let alert = NSAlert()
+                alert.messageText = "Snifix cannot unlock its certificate key"
+                alert.informativeText = "The key is encrypted and its password is in your Keychain. Click Try Again and choose Always Allow when macOS asks.\n\n\(error)"
+                alert.addButton(withTitle: "Try Again")
+                alert.addButton(withTitle: "Quit")
+                if alert.runModal() != .alertFirstButtonReturn { exit(1) }
+            }
         }
     }
 

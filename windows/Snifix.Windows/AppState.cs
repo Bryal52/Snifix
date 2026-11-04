@@ -66,6 +66,8 @@ public sealed class AppState : INotifyPropertyChanged
     public string PacUrl => $"http://{LocalAddress}:{Settings.Port}/proxy.pac";
     public string CertificatePageUrl => $"http://{LocalAddress}:{Settings.Port}/";
     public event Action<string>? Toast;
+    /// Devices on the network waiting for an answer: address → "iPhone" / "Android" / "Device".
+    public ObservableCollection<KeyValuePair<string, string>> AccessRequests { get; } = new();
 
     AppState()
     {
@@ -75,6 +77,10 @@ public sealed class AppState : INotifyPropertyChanged
         Settings = Load<ProxySettings>("settings.json") ?? new ProxySettings();
         Rules = Load<RulesDocument>("rules.json") ?? new RulesDocument();
         Engine = new ProxyEngine(DataDirectory, Settings, Rules);
+        Engine.AccessRequested += (address, device) => Dispatcher.UIThread.Post(() =>
+        {
+            if (AccessRequests.All(r => r.Key != address)) AccessRequests.Add(new(address, device ?? "Device"));
+        });
         Engine.FlowStarted += f => added.Enqueue(f);
         Engine.FlowUpdated += f => updated[f.Id] = f;
         Engine.ScriptLog += line => Dispatcher.UIThread.Post(() =>
@@ -302,6 +308,34 @@ public sealed class AppState : INotifyPropertyChanged
     }
 
     public void ShowToast(string text) => Toast?.Invoke(text);
+
+    public void AllowDevice(string address)
+    {
+        if (!Settings.ApprovedClients.Contains(address)) Settings.ApprovedClients.Add(address);
+        SaveSettings();
+        Engine.ForgetClient(address);
+        Remove(address);
+        ShowToast($"{address} may use Snifix — open the app on the device again");
+    }
+
+    public void DenyDevice(string address)
+    {
+        Engine.DenyClient(address);
+        Remove(address);
+        ShowToast($"{address} is not allowed until Snifix restarts");
+    }
+
+    public void RemoveApprovedDevice(string address)
+    {
+        Settings.ApprovedClients.Remove(address);
+        SaveSettings();
+        Engine.ForgetClient(address);
+    }
+
+    void Remove(string address)
+    {
+        foreach (var r in AccessRequests.Where(r => r.Key == address).ToList()) AccessRequests.Remove(r);
+    }
 
     public event PropertyChangedEventHandler? PropertyChanged;
     void Changed([CallerMemberName] string? n = null) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(n));

@@ -19,18 +19,32 @@ public final class CertificateAuthority: @unchecked Sendable {
 
     /// Loads the CA from `directory` or creates a new one there.
     /// `name` is used only when a new CA is created; test copies pass their own so phones can tell them apart.
-    public init(directory: URL, name: String? = nil) throws {
+    /// With a `protector` the private key is stored encrypted; an existing plain key file is moved over to it.
+    public init(directory: URL, name: String? = nil, protector: KeyProtector? = nil) throws {
         let certURL = directory.appendingPathComponent("snifix-ca.pem")
-        let keyURL = directory.appendingPathComponent("snifix-ca-key.pem")
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let plainKeyURL = directory.appendingPathComponent("snifix-ca-key.pem")
+        let sealedKeyURL = directory.appendingPathComponent("snifix-ca-key.sealed")
+        let fm = FileManager.default
+        try fm.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        var storedKey: P256.Signing.PrivateKey?
+        if let protector, fm.fileExists(atPath: sealedKeyURL.path) {
+            // A key that cannot be unlocked is an error, never a reason to make a new CA: phones trust the old one
+            storedKey = try P256.Signing.PrivateKey(rawRepresentation: protector.open(Data(contentsOf: sealedKeyURL)))
+        } else if let pem = try? String(contentsOf: plainKeyURL, encoding: .utf8) {
+            storedKey = try? P256.Signing.PrivateKey(pemRepresentation: pem)
+        }
 
         if let certPEM = try? String(contentsOf: certURL, encoding: .utf8),
-           let keyPEM = try? String(contentsOf: keyURL, encoding: .utf8),
            let cert = try? Certificate(pemEncoded: certPEM),
-           let key = try? P256.Signing.PrivateKey(pemRepresentation: keyPEM),
+           let key = storedKey,
            cert.notValidAfter > Date().addingTimeInterval(86400 * 30) {
             certificate = cert
             caKey = key
+            if let protector, fm.fileExists(atPath: plainKeyURL.path) {
+                try Self.storeSealed(key, protector, to: sealedKeyURL)
+                Self.wipe(plainKeyURL)
+            }
         } else {
             let key = P256.Signing.PrivateKey()
             let name = try DistinguishedName {
@@ -56,8 +70,12 @@ public final class CertificateAuthority: @unchecked Sendable {
             )
             caKey = key
             try certificate.serializeAsPEM().pemString.write(to: certURL, atomically: true, encoding: .utf8)
-            try key.pemRepresentation.write(to: keyURL, atomically: true, encoding: .utf8)
-            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: keyURL.path)
+            if let protector {
+                try Self.storeSealed(key, protector, to: sealedKeyURL)
+                Self.wipe(plainKeyURL)
+            } else {
+                try Self.writePrivate(Data(key.pemRepresentation.utf8), to: plainKeyURL)
+            }
         }
         certificatePEM = try certificate.serializeAsPEM().pemString
         var serializer = DER.Serializer()
@@ -67,9 +85,33 @@ public final class CertificateAuthority: @unchecked Sendable {
         leafSSLKey = try NIOSSLPrivateKey(bytes: Array(leafKey.pemRepresentation.utf8), format: .pem)
     }
 
+    /// SHA-256 of the certificate, as iOS and Android show it in the certificate details.
+    public var fingerprint: String {
+        SHA256.hash(data: certificateDER).map { String(format: "%02X", $0) }.joined(separator: " ")
+    }
+
+    private static func storeSealed(_ key: P256.Signing.PrivateKey, _ protector: KeyProtector, to url: URL) throws {
+        try writePrivate(protector.seal(key.rawRepresentation), to: url)
+    }
+
+    /// Creates the file readable by this user only, before any secret is written into it.
+    private static func writePrivate(_ data: Data, to url: URL) throws {
+        let fm = FileManager.default
+        fm.createFile(atPath: url.path, contents: nil, attributes: [.posixPermissions: 0o600])
+        try data.write(to: url)
+        try fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+    }
+
+    /// Overwrites a plain key file before deleting it.
+    private static func wipe(_ url: URL) {
+        guard let size = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? Int else { return }
+        try? Data(repeating: 0, count: size).write(to: url)
+        try? FileManager.default.removeItem(at: url)
+    }
+
     public var commonName: String {
-        certificate.subject.description.replacingOccurrences(of: "CN=", with: "")
-            .components(separatedBy: ",").first ?? "Snifix CA"
+        let parts = certificate.subject.description.components(separatedBy: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+        return parts.first { $0.hasPrefix("CN=") }.map { String($0.dropFirst(3)) } ?? "Snifix CA"
     }
 
     /// Server-side TLS context presenting a certificate for `host`, cached per host.

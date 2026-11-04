@@ -21,9 +21,9 @@ jobs:
   windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
         with:
           dotnet-version: "10.0.x"
 
@@ -34,9 +34,12 @@ jobs:
           $v = @($p.Project.PropertyGroup | ForEach-Object { $_.Version } | Where-Object { $_ })[0]
           "SNIFIX_VERSION=$v" >> $env:GITHUB_ENV
 
+      - name: Restore (exact versions from packages.lock.json)
+        run: dotnet restore windows/Snifix.Windows -r win-x64 --locked-mode
+
       - name: Publish
         run: >
-          dotnet publish windows/Snifix.Windows -c Release -r win-x64 --self-contained true
+          dotnet publish windows/Snifix.Windows -c Release -r win-x64 --self-contained true --no-restore
           -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true
           -o dist/win
 
@@ -55,7 +58,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit 1 }
           Compress-Archive -Path dist/win/Snifix.exe -DestinationPath "dist/Snifix-$env:SNIFIX_VERSION-windows-x64.zip"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: Snifix-windows
           path: |
@@ -67,6 +70,8 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
+          # Passed through the environment, not pasted into the script
+          RELEASE_TAG: ${{ github.event.release.tag_name || github.event.inputs.tag }}
         run: |
-          $tag = if ("${{ github.event_name }}" -eq "release") { "${{ github.event.release.tag_name }}" } else { "${{ github.event.inputs.tag }}" }
+          $tag = $env:RELEASE_TAG
           gh release upload $tag (Get-ChildItem dist/Snifix-*-Setup.exe).FullName (Get-ChildItem dist/Snifix-*-windows-x64.zip).FullName --clobber

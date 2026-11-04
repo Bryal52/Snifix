@@ -42,6 +42,10 @@ enum MapLocal {
         let rest = suffix(rule: rule, request: request)
         guard !rest.contains("..") else { return nil }
         let base = rest.isEmpty ? dir : dir.appendingPathComponent(rest)
+        // Symlinks and odd paths resolved, the result must still be inside the folder
+        let root = dir.resolvingSymlinksInPath().standardizedFileURL.path
+        let resolved = base.resolvingSymlinksInPath().standardizedFileURL.path
+        guard resolved == root || resolved.hasPrefix(root + "/") else { return nil }
         let fm = FileManager.default
         var isDir: ObjCBool = false
         if fm.fileExists(atPath: base.path, isDirectory: &isDir) {

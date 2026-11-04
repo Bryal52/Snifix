@@ -228,6 +228,20 @@ public sealed class DevicesWindow : Window
         return row;
     }
 
+    /// The certificate comes over plain Wi-Fi, so the phone's copy should be compared with this one.
+    Control FingerprintBox(bool android)
+    {
+        var p = Ui.Column(4);
+        p.Children.Add(new TextBlock { Text = "Check the certificate", FontWeight = FontWeight.SemiBold });
+        p.Children.Add(Ui.Text(android
+            ? "On the phone open Settings → Security → Encryption & credentials → Trusted credentials → User → Snifix CA: the SHA-256 fingerprint must be the same as here."
+            : "On the iPhone open Settings → General → VPN & Device Management → Snifix CA → More Details: the SHA-256 fingerprint must be the same as here. If it differs, do not trust it — someone on the network replaced it.",
+            11, "#8D879C"));
+        p.Children.Add(new SelectableTextBlock { Text = state.Engine.Fingerprint, FontSize = 11, TextWrapping = TextWrapping.Wrap,
+            Foreground = new SolidColorBrush(Color.Parse("#FFCC33")), FontFamily = new FontFamily("Cascadia Mono, Consolas, Menlo, monospace") });
+        return p;
+    }
+
     Control PcCard()
     {
         var p = Ui.Column(10);
@@ -238,6 +252,22 @@ public sealed class DevicesWindow : Window
         if (!trusted) p.Children.Add(Ui.Button("Install Certificate…", () => state.TrustCertificate(), gold: true));
         p.Children.Add(Ui.Check("Capture this PC's traffic at launch (when the certificate is trusted)", state.Settings.CaptureOnLaunch,
             v => { state.Settings.CaptureOnLaunch = v; state.SaveSettings(); }));
+        p.Children.Add(Ui.Label("Other devices on the network"));
+        p.Children.Add(Ui.Combo(new[] { ("Ask for each new device", "ask"), ("Allow every device on the local network", "always"), ("Nobody — only this PC", "never") },
+            state.Settings.RemoteAccess, v => { state.Settings.RemoteAccess = v; state.SaveSettings(); }));
+        p.Children.Add(Ui.Text("Devices from the internet are never allowed, and other devices cannot reach this PC's localhost through Snifix.", 11, "#8D879C"));
+        var approved = Ui.Column(4);
+        void FillApproved()
+        {
+            approved.Children.Clear();
+            foreach (var address in state.Settings.ApprovedClients.ToList())
+            {
+                var remove = Ui.Button("Remove", () => { state.RemoveApprovedDevice(address); FillApproved(); });
+                approved.Children.Add(Ui.Row(Ui.Text("✓ " + address, 12, "#FFCC33"), remove));
+            }
+        }
+        FillApproved();
+        p.Children.Add(approved);
         p.Children.Add(Ui.Label("HTTPS"));
         p.Children.Add(Ui.Check("Decrypt HTTPS", state.Settings.DecryptHttps, v => { state.Settings.DecryptHttps = v; state.SaveSettings(); }));
         p.Children.Add(Ui.Check("Verify server certificates (turn off for test servers with self-signed certificates)", state.Settings.VerifyServerCertificates,
@@ -277,6 +307,7 @@ public sealed class DevicesWindow : Window
         steps.Margin = new Thickness(18, 0, 0, 0);
         row.Children.Add(steps);
         p.Children.Add(row);
+        p.Children.Add(Ui.Card(FingerprintBox(android)));
         p.Children.Add(Ui.Label("When to capture phones"));
         p.Children.Add(Ui.Combo(new[] { ("Always while Snifix is running", "always"), ("Never (the PAC says DIRECT)", "off") }, state.Settings.PhoneMode,
             v => { state.Settings.PhoneMode = v; state.SaveSettings(); }));

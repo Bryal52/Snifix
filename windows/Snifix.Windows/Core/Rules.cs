@@ -44,7 +44,8 @@ public sealed class RuleMatcher
         var target = url;
         if (!UseRegex && !Pattern.Contains('?') && target.IndexOf('?') is var q and >= 0) target = target[..q];
         var re = PatternCache.Get(this);
-        return re != null && re.IsMatch(target);
+        try { return re != null && re.IsMatch(target); }
+        catch (RegexMatchTimeoutException) { return false; }
     }
 }
 
@@ -67,7 +68,8 @@ static class PatternCache
                 if (m.IncludeSubpaths) p += "([/?#].*)?";
                 source = "^" + p + "$";
             }
-            try { r = new Regex(source, RegexOptions.IgnoreCase | RegexOptions.Compiled); } catch { r = null; }
+            // A slow pattern (from someone else's rules file) must not stall every request
+            try { r = new Regex(source, RegexOptions.IgnoreCase | RegexOptions.Compiled, TimeSpan.FromMilliseconds(50)); } catch { r = null; }
             Cache[key] = r;
             return r;
         }

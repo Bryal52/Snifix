@@ -1,3 +1,4 @@
+using System.Net;
 using System.Text;
 
 namespace Snifix.Core;
@@ -56,6 +57,29 @@ public static class SelfTest
         Check("Certificate page", text.Contains("BEGIN CERTIFICATE"), text);
         (st, text, _) = await Get("GET", "http://snifix.cert/proxy.pac");
         Check("PAC file", text.Contains("FindProxyForURL"), text);
+        // Map Local from a folder: nothing outside the folder, also not by a full or drive path in the URL
+        var mocks = Path.Combine(dir, "mocks");
+        Directory.CreateDirectory(Path.Combine(mocks, "users"));
+        File.WriteAllText(Path.Combine(mocks, "users", "42.json"), "{\"id\":42}");
+        File.WriteAllText(Path.Combine(dir, "secret.txt"), "secret");
+        var folder = new Rule { Name = "Folder", Kind = RuleKind.mapLocal, Matcher = new() { Pattern = "https://example.com/api/*" } };
+        folder.MapLocal.Source = MapLocalSource.directory;
+        folder.MapLocal.Path = mocks;
+        rules.Rules.Insert(0, folder);
+        (st, text, _) = await Get("GET", "https://example.com/api/users/42");
+        Check("Map Local folder serves its files", text.Contains("\"id\":42"), text);
+        var secret = Uri.EscapeDataString(Path.Combine(dir, "secret.txt"));
+        (st, text, _) = await Get("GET", "https://example.com/api/" + secret);
+        Check("Map Local folder refuses full paths", !text.Contains("secret") || text.Contains("not found"), text);
+        (st, text, _) = await Get("GET", "https://example.com/api/C:%5CWindows%5Cwin.ini");
+        Check("Map Local folder refuses drive paths", st == 404, $"{st}");
+        rules.Rules.Remove(folder);
+
+        Check("Local network addresses", ProxyEngine.IsPrivate(IPAddress.Parse("192.168.1.5")) && ProxyEngine.IsPrivate(IPAddress.Parse("10.0.0.2"))
+              && !ProxyEngine.IsPrivate(IPAddress.Parse("8.8.8.8")));
+        Check("Localhost is off limits for other devices", ProxyEngine.IsLoopback("127.0.0.1") && ProxyEngine.IsLoopback("localhost") && !ProxyEngine.IsLoopback("example.com"));
+        Check("Fingerprint", engine.Fingerprint.Split(' ').Length == 32, engine.Fingerprint);
+
         await Task.Delay(300);
         lock (flows) Check("Flows recorded", flows.Count >= 7, $"{flows.Count}");
         lock (log) Check("Script log", log.Any(l => l.Contains("patched")), string.Join(";", log));
