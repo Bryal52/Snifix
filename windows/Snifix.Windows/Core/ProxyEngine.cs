@@ -162,9 +162,6 @@ public sealed class ProxyEngine : IDisposable
         server.SupportedSslProtocols = System.Security.Authentication.SslProtocols.Tls12 | System.Security.Authentication.SslProtocols.Tls13;
         server.SupportedServerSslProtocols = System.Security.Authentication.SslProtocols.Tls12 | System.Security.Authentication.SslProtocols.Tls13;
         server.ClientHeaderTimeoutSeconds = 15;
-        // A client that stops reading, or a connection that goes silent mid-read, is dropped and frees its budget
-        server.IdleReadTimeoutSeconds = 30;
-        server.IdleWriteTimeoutSeconds = 30;
 
         endPoint = new ExplicitProxyEndPoint(IPAddress.Any, Settings.Port, Settings.DecryptHttps);
         endPoint.BeforeTunnelConnectRequest += OnTunnel;
