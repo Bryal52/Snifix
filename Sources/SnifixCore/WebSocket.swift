@@ -1,5 +1,6 @@
 import Foundation
 import NIOCore
+import NIOConcurrencyHelpers
 import NIOPosix
 import NIOHTTP1
 import NIOSSL
@@ -108,6 +109,89 @@ enum WebSocketBridge {
     }
 }
 
+/// Payloads of messages on open WebSocket connections share one limit (256 MB). Past it the oldest go first,
+/// on any connection, and keep only their time, direction and size. New messages are never refused, and
+/// requests are not affected: this is separate from the transfer budget. When a connection ends its
+/// messages leave this count and fall under the list's memory limit.
+enum WebSocketStore {
+    static let limit = NIOLockedValueBox(256 * 1024 * 1024)
+
+    private struct Entry { let owner: UInt64; weak var recorder: FlowRecorder?; let messageID: Int; let size: Int }
+    private struct Owner { var bytes = 0; var entries = 0 }
+    private struct State {
+        var queue: [Entry] = []
+        var head = 0
+        var total = 0
+        var live = 0
+        var owners: [UInt64: Owner] = [:]
+        var nextOwner: UInt64 = 1
+    }
+    private static let state = NIOLockedValueBox(State())
+
+    static func newOwner() -> UInt64 {
+        state.withLockedValue { s in
+            defer { s.nextOwner += 1 }
+            s.owners[s.nextOwner] = Owner()
+            return s.nextOwner
+        }
+    }
+
+    /// Counts a kept payload and removes the oldest ones while the total is over the limit.
+    static func add(owner: UInt64, recorder: FlowRecorder, messageID: Int, size: Int) {
+        let limit = self.limit.withLockedValue { $0 }
+        let victims: [(FlowRecorder, Int)] = state.withLockedValue { s in
+            guard s.owners[owner] != nil else { return [] }
+            s.queue.append(Entry(owner: owner, recorder: recorder, messageID: messageID, size: size))
+            s.owners[owner]!.bytes += size
+            s.owners[owner]!.entries += 1
+            s.total += size
+            s.live += 1
+            var out: [(FlowRecorder, Int)] = []
+            while s.total > limit, s.head < s.queue.count {
+                let e = s.queue[s.head]
+                s.head += 1
+                // Entries of closed connections were already taken out of the count
+                guard s.owners[e.owner] != nil else { continue }
+                s.owners[e.owner]!.bytes -= e.size
+                s.owners[e.owner]!.entries -= 1
+                s.total -= e.size
+                s.live -= 1
+                if let r = e.recorder { out.append((r, e.messageID)) }
+            }
+            compact(&s)
+            return out
+        }
+        // Outside the store lock: the recorder takes its own lock and reports to the window
+        for (r, id) in victims {
+            r.update { f in
+                guard let i = f.webSocketMessages.firstIndex(where: { $0.id == id }) else { return }
+                f.webSocketMessages[i].droppedSize = f.webSocketMessages[i].payload.count
+                f.webSocketMessages[i].payload = Data()
+            }
+        }
+    }
+
+    static func forget(owner: UInt64) {
+        state.withLockedValue { s in
+            guard let o = s.owners.removeValue(forKey: owner) else { return }
+            s.total -= o.bytes
+            s.live -= o.entries
+            compact(&s)
+        }
+    }
+
+    /// Drops used and stale entries so the queue stays near the number of kept messages.
+    private static func compact(_ s: inout State) {
+        let remaining = s.queue.count - s.head
+        guard remaining > 2 * s.live + 1024 || (s.head > 1024 && s.head > s.queue.count / 2) else { return }
+        let owners = s.owners
+        s.queue = s.queue[s.head...].filter { owners[$0.owner] != nil }
+        s.head = 0
+    }
+
+    static var total: Int { state.withLockedValue { $0.total } }
+}
+
 /// Relays raw bytes and parses WebSocket frames from them for display.
 final class FrameRelay: ChannelInboundHandler, RemovableChannelHandler {
     typealias InboundIn = ByteBuffer
@@ -116,11 +200,10 @@ final class FrameRelay: ChannelInboundHandler, RemovableChannelHandler {
     private let recorder: FlowRecorder?
     private var pending = ByteBuffer()
     private var tooBig = false
-    /// Payload bytes kept for display in this direction; later messages keep only their metadata.
-    private var kept = 0
-    private static let keepLimit = 32 * 1024 * 1024
-    /// Bytes of the shared body budget held by unparsed bytes and kept payloads; returned when the connection ends.
+    /// Bytes of the transfer budget held by frames not parsed yet.
     private var reserved = 0
+    /// This direction's kept payloads in the WebSocket store; they leave it when the connection ends.
+    private let storeOwner = WebSocketStore.newOwner()
     private static let counter = NSLock()
     private static var nextMessageID = 1
 
@@ -144,19 +227,16 @@ final class FrameRelay: ChannelInboundHandler, RemovableChannelHandler {
         reserved += buffer.readableBytes
         pending.writeBuffer(&buffer)
         let before = pending.readableBytes
-        while var message = parseFrame() {
-            if kept + message.payload.count > FrameRelay.keepLimit || !ProxyLimits.reserve(message.payload.count) {
-                message.droppedSize = message.payload.count
-                message.payload = Data()
-            } else {
-                kept += message.payload.count
-                reserved += message.payload.count
-            }
+        while let message = parseFrame() {
+            var added = false
             recorder?.update {
-                if $0.webSocketMessages.count < 10000 { $0.webSocketMessages.append(message) }
+                if $0.webSocketMessages.count < 10000 { $0.webSocketMessages.append(message); added = true }
+            }
+            if added, let recorder, !message.payload.isEmpty {
+                WebSocketStore.add(owner: storeOwner, recorder: recorder, messageID: message.id, size: message.payload.count)
             }
         }
-        // Parsed bytes left the buffer (a kept payload was counted on its own above)
+        // Parsed bytes left the transfer buffer; kept payloads are counted by the WebSocket store instead
         let parsed = before - pending.readableBytes
         ProxyLimits.release(parsed)
         reserved -= parsed
@@ -170,6 +250,7 @@ final class FrameRelay: ChannelInboundHandler, RemovableChannelHandler {
     func handlerRemoved(context: ChannelHandlerContext) {
         ProxyLimits.release(reserved)
         reserved = 0
+        WebSocketStore.forget(owner: storeOwner)
     }
 
     private func parseFrame() -> WebSocketMessage? {

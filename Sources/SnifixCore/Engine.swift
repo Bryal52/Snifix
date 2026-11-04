@@ -552,5 +552,7 @@ public enum ProxyLimitsForTest {
     public static func isValidHost(_ host: String) -> Bool { ProxyLimits.isValidHost(host) }
     public static var bufferedBytes: Int { ProxyLimits.bufferedBytes }
     public static func setBufferLimit(_ n: Int) { ProxyLimits.bufferLimit.withLockedValue { $0 = n } }
+    public static var webSocketStored: Int { WebSocketStore.total }
+    public static func setWebSocketLimit(_ n: Int) { WebSocketStore.limit.withLockedValue { $0 = n } }
 }
 #endif

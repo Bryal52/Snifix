@@ -136,6 +136,34 @@ Thread.sleep(forTimeInterval: 0.5)
 let wsFlow = sink.lock.withLock { sink.flows.values.first { $0.isWebSocket } }
 check("WebSocket сообщения записаны", (wsFlow?.webSocketMessages.count ?? 0) >= 2, "\(wsFlow?.webSocketMessages.count ?? -1)")
 
+// WebSocket payloads have their own store: past its limit the oldest are removed, the messages stay
+ProxyLimitsForTest.setWebSocketLimit(1)
+let ws2 = session.webSocketTask(with: URL(string: "wss://echo.websocket.org/?store")!)
+ws2.resume()
+let ws2Done = DispatchSemaphore(value: 0)
+ws2.send(.string("store test from Snifix")) { _ in }
+func receiveEcho2() {
+    ws2.receive { result in
+        if case .success(.string(let s)) = result, s.contains("store test") { ws2Done.signal() }
+        else if case .success = result { receiveEcho2() }
+        else { ws2Done.signal() }
+    }
+}
+receiveEcho2()
+_ = ws2Done.wait(timeout: .now() + 15)
+Thread.sleep(forTimeInterval: 0.3)
+let storeWhileOpen = ProxyLimitsForTest.webSocketStored
+let ws2Flow = sink.lock.withLock { sink.flows.values.first { $0.isWebSocket && $0.request.url.contains("store") } }
+let ws2Messages = (ws2Flow?.webSocketMessages ?? []).filter { $0.opcode == 1 }
+check("WebSocket store removes the oldest payloads past its limit",
+      ws2Messages.count >= 2 && ws2Messages.allSatisfy { $0.payload.isEmpty && ($0.droppedSize ?? 0) > 0 } && storeWhileOpen <= 1,
+      "\(ws2Messages.map { "\($0.payload.count)/\($0.droppedSize ?? -1)" }) store \(storeWhileOpen)")
+ws2.cancel(with: .normalClosure, reason: nil)
+ProxyLimitsForTest.setWebSocketLimit(256 * 1024 * 1024)
+// The server side of a TLS connection can take a few seconds to finish closing
+for _ in 0..<20 where ProxyLimitsForTest.webSocketStored != 0 { Thread.sleep(forTimeInterval: 0.5) }
+check("WebSocket store is empty after the connections closed", ProxyLimitsForTest.webSocketStored == 0, "\(ProxyLimitsForTest.webSocketStored)")
+
 // A client that rejects the Snifix certificate (like an app with pinning)
 func curlNoCA(_ url: String, proxy: String = "127.0.0.1") -> Int32 {
     let p = Process()
