@@ -40,6 +40,9 @@ public sealed class Flow : INotifyPropertyChanged
     public DateTime? Completed { get; set; }
     public List<string> Rules { get; } = new();
     public bool IsHttps => Scheme == "https";
+    /// Bytes this flow holds of the transfer budget, and the other device they count against (null: this computer).
+    public long BudgetHeld { get; set; }
+    public string? BudgetDevice { get; set; }
 
     public string DeviceKey => IsLocal ? "This PC" : ClientAddress;
     public string StatusText => State switch
@@ -147,6 +150,8 @@ public static class Categories
 public static class Body
 {
     /// Body without Content-Encoding (gzip, deflate, br); the raw data when it cannot be decoded.
+    public const int MaxDecoded = 64 * 1024 * 1024;
+
     public static byte[] Decoded(byte[] body, string? encoding)
     {
         if (body.Length == 0 || string.IsNullOrEmpty(encoding)) return body;
@@ -160,8 +165,15 @@ public static class Body
                 "br" => new BrotliStream(input, CompressionMode.Decompress),
                 _ => input,
             };
+            // A small "zip bomb" must not unpack into gigabytes: past 64 MB the body is shown as it came
             using var output = new MemoryStream();
-            s.CopyTo(output);
+            var buffer = new byte[81920];
+            int n;
+            while ((n = s.Read(buffer, 0, buffer.Length)) > 0)
+            {
+                if (output.Length + n > MaxDecoded) return body;
+                output.Write(buffer, 0, n);
+            }
             return output.ToArray();
         }
         catch { return body; }

@@ -35,6 +35,73 @@ public sealed class ProxySettings
     public Dictionary<string, DateTime> ApprovedAt { get; set; } = new();
 }
 
+/// Request and response bodies held by all sessions together while they are received, processed and sent (1 GB),
+/// and by one other device (256 MB), so parallel uploads or downloads cannot use up the computer's memory and one
+/// device cannot block the rest. A session that never reaches AfterResponse gives its share back after 10 minutes.
+public static class TransferBudget
+{
+    public static long Limit { get; set; } = 1L << 30;
+    public const long DeviceShare = 256L << 20;
+    static readonly object Gate = new();
+    static long total;
+    static readonly Dictionary<string, long> ByDevice = new();
+    static readonly Dictionary<Flow, DateTime> Holders = new();
+    static readonly Timer Sweeper = new(_ => Sweep(), null, TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(1));
+
+    public static long Held { get { lock (Gate) return total; } }
+
+    /// Makes the flow hold `bytes` in all; false (and nothing more taken) when a limit would be passed.
+    public static bool Ensure(Flow flow, long bytes)
+    {
+        lock (Gate)
+        {
+            var more = bytes - flow.BudgetHeld;
+            if (more <= 0) return true;
+            if (total + more > Limit) return false;
+            if (flow.BudgetDevice is string d)
+            {
+                if (ByDevice.GetValueOrDefault(d) + more > DeviceShare) return false;
+                ByDevice[d] = ByDevice.GetValueOrDefault(d) + more;
+            }
+            total += more;
+            flow.BudgetHeld = bytes;
+            Holders[flow] = DateTime.UtcNow;
+            return true;
+        }
+    }
+
+    public static void Release(Flow flow)
+    {
+        lock (Gate)
+        {
+            if (flow.BudgetHeld == 0) return;
+            total = Math.Max(0, total - flow.BudgetHeld);
+            if (flow.BudgetDevice is string d)
+            {
+                var left = ByDevice.GetValueOrDefault(d) - flow.BudgetHeld;
+                if (left > 0) ByDevice[d] = left; else ByDevice.Remove(d);
+            }
+            flow.BudgetHeld = 0;
+            Holders.Remove(flow);
+        }
+    }
+
+    public static string Busy(Flow flow)
+    {
+        lock (Gate)
+            return flow.BudgetDevice is string d && ByDevice.GetValueOrDefault(d) >= DeviceShare / 2
+                ? "this device already has 256 MB of bodies in transfer through Snifix. Try again in a moment."
+                : "Snifix is already holding 1 GB of bodies in transfer for all devices together. Try again in a moment.";
+    }
+
+    static void Sweep()
+    {
+        List<Flow> stale;
+        lock (Gate) stale = Holders.Where(h => DateTime.UtcNow - h.Value > TimeSpan.FromMinutes(10)).Select(h => h.Key).ToList();
+        foreach (var f in stale) Release(f);
+    }
+}
+
 /// The proxy: decrypts HTTPS, applies the rules and reports every request as a Flow.
 public sealed class ProxyEngine : IDisposable
 {
@@ -95,6 +162,10 @@ public sealed class ProxyEngine : IDisposable
         server.SupportedSslProtocols = System.Security.Authentication.SslProtocols.Tls12 | System.Security.Authentication.SslProtocols.Tls13;
         server.SupportedServerSslProtocols = System.Security.Authentication.SslProtocols.Tls12 | System.Security.Authentication.SslProtocols.Tls13;
         server.ClientHeaderTimeoutSeconds = 15;
+        // A client that stops reading, or a connection that goes silent mid-read, is dropped and frees its budget
+        server.IdleReadTimeoutSeconds = 30;
+        server.IdleWriteTimeoutSeconds = 30;
+
         endPoint = new ExplicitProxyEndPoint(IPAddress.Any, Settings.Port, Settings.DecryptHttps);
         endPoint.BeforeTunnelConnectRequest += OnTunnel;
         server.AddEndPoint(endPoint);
@@ -273,8 +344,8 @@ public sealed class ProxyEngine : IDisposable
     public void DenyClient(string address) { lock (asked) denied.Add(address); }
     public void ForgetClient(string address) { lock (asked) { denied.Remove(address); asked.Remove(address); } }
 
-    static void Refuse(SessionEventArgs e, string message) =>
-        e.GenericResponse(Encoding.UTF8.GetBytes($"Snifix: {message}\n"), HttpStatusCode.Forbidden,
+    static void Refuse(SessionEventArgs e, string message, HttpStatusCode status = HttpStatusCode.Forbidden) =>
+        e.GenericResponse(Encoding.UTF8.GetBytes($"Snifix: {message}\n"), status,
             new Dictionary<string, HttpHeader> { ["Content-Type"] = new("Content-Type", "text/plain; charset=utf-8") }, true);
 
     bool SignedBySnifix(X509Certificate cert)
@@ -375,7 +446,30 @@ public sealed class ProxyEngine : IDisposable
 
         var flow = NewFlow(e, request.Method, uri.ToString());
         e.UserData = flow;
-        if (request.HasBody) flow.RequestBody = await e.GetRequestBody();
+        if (request.HasBody)
+        {
+            // Bodies of all devices share one budget: past it the request is answered with 503 instead of read
+            flow.BudgetDevice = IsLocalClient(e) ? null : Remote(e)?.ToString();
+            if (!TransferBudget.Ensure(flow, Math.Max(request.ContentLength, 0))) { Refuse(e, TransferBudget.Busy(flow), HttpStatusCode.ServiceUnavailable); return; }
+            // A body that stops arriving frees the budget: 30 s plus the time 256 KB/s needs, or 2 minutes when the size is unknown
+            var read = e.GetRequestBody();
+            var allowed = request.ContentLength >= 0 ? TimeSpan.FromSeconds(30 + request.ContentLength / 262_144) : TimeSpan.FromMinutes(2);
+            if (await Task.WhenAny(read, Task.Delay(allowed)) != read)
+            {
+                TransferBudget.Release(flow);
+                _ = read.ContinueWith(t => _ = t.Exception, TaskContinuationOptions.OnlyOnFaulted);
+                e.TerminateSession();
+                return;
+            }
+            try { flow.RequestBody = await read; }
+            catch { TransferBudget.Release(flow); throw; }
+            if (!TransferBudget.Ensure(flow, flow.RequestBody.Length))
+            {
+                flow.RequestBody = Array.Empty<byte>();
+                Refuse(e, TransferBudget.Busy(flow), HttpStatusCode.ServiceUnavailable);
+                return;
+            }
+        }
         var record = ShouldRecord(uri.Host);
         if (record) FlowStarted?.Invoke(flow);
 
@@ -511,7 +605,24 @@ public sealed class ProxyEngine : IDisposable
     {
         if (e.UserData is not Flow flow) return;
         var response = e.HttpClient.Response;
-        var body = response.HasBody ? await e.GetResponseBody() : Array.Empty<byte>();
+        var body = Array.Empty<byte>();
+        if (response.HasBody)
+        {
+            if (!TransferBudget.Ensure(flow, flow.RequestBody.Length + Math.Max(response.ContentLength, 0)))
+            {
+                Fail(flow, TransferBudget.Busy(flow));
+                Refuse(e, TransferBudget.Busy(flow), HttpStatusCode.ServiceUnavailable);
+                return;
+            }
+            try { body = await e.GetResponseBody(); }
+            catch { TransferBudget.Release(flow); throw; }
+            if (!TransferBudget.Ensure(flow, flow.RequestBody.Length + body.Length))
+            {
+                Fail(flow, TransferBudget.Busy(flow));
+                Refuse(e, TransferBudget.Busy(flow), HttpStatusCode.ServiceUnavailable);
+                return;
+            }
+        }
         var headers = response.Headers.GetAllHeaders().Select(h => new HeaderItem(h.Name, h.Value)).ToList();
         var status = response.StatusCode;
         var changed = false;
@@ -558,10 +669,19 @@ public sealed class ProxyEngine : IDisposable
         flow.ResponseVersion = response.HttpVersion.Major >= 2 ? "HTTP/2" : $"HTTP/{response.HttpVersion.Major}.{response.HttpVersion.Minor}";
         flow.Trailers = response.TrailingHeaders.GetAllHeaders().Select(h => new HeaderItem(h.Name, h.Value)).ToList();
         Complete(flow, status, string.IsNullOrEmpty(response.StatusDescription) ? Reason(status) : response.StatusDescription, headers, body);
+        // A client that stops reading is dropped: 30 s plus the time 256 KB/s needs for the body, then the budget comes back
+        var sending = flow.BudgetHeld;
+        _ = Task.Delay(TimeSpan.FromSeconds(30 + body.Length / 262_144)).ContinueWith(_ =>
+        {
+            if (flow.BudgetHeld == 0 || flow.BudgetHeld != sending) return;
+            TransferBudget.Release(flow);
+            try { e.TerminateSession(); } catch { }
+        });
     }
 
     Task OnAfterResponse(object sender, SessionEventArgs e)
     {
+        if (e.UserData is Flow done) TransferBudget.Release(done);
         if (e.UserData is Flow flow && flow.State == FlowState.Active)
         {
             if (e.Exception != null) Fail(flow, e.Exception.GetBaseException().Message);

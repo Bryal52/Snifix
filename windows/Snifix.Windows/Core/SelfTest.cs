@@ -92,6 +92,142 @@ public static class SelfTest
         Check("Localhost is off limits for other devices", ProxyEngine.IsLoopback("127.0.0.1") && ProxyEngine.IsLoopback("localhost") && !ProxyEngine.IsLoopback("example.com"));
         Check("Fingerprint", engine.Fingerprint.Split(' ').Length == 32, engine.Fingerprint);
 
+        // A small "zip bomb" is not unpacked past 64 MB
+        using (var packed = new MemoryStream())
+        {
+            using (var gz = new System.IO.Compression.GZipStream(packed, System.IO.Compression.CompressionLevel.Fastest, true))
+            {
+                var zeros = new byte[1 << 20];
+                for (int i = 0; i < 300; i++) gz.Write(zeros);
+            }
+            var bomb = packed.ToArray();
+            var unpacked = Body.Decoded(bomb, "gzip");
+            Check("Decompression bomb is not unpacked", unpacked.Length <= bomb.Length, $"{bomb.Length} → {unpacked.Length}");
+        }
+
+        // Bodies of all sessions share one budget: past it a request is answered with 503
+        var big = new string('x', 2 * 1024 * 1024);
+        TransferBudget.Limit = 1024 * 1024;
+        (st, text, _) = await Get("POST", "https://httpbin.org/post", big);
+        Check("Body budget refuses with 503", st == 503 && text.Contains("1 GB"), $"{st} {text}");
+        TransferBudget.Limit = 1L << 30;
+        (st, text, _) = await Get("POST", "https://example.com/mock/profile", big);
+        Check("Same upload passes under the normal budget", st == 200 && text.Contains("Snifix"), $"{st}");
+
+        // Stuck clients free their budget, while a quiet tunnel (WebSocket, push) stays open
+        var echo = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
+        echo.Start();
+        var echoPort = ((IPEndPoint)echo.LocalEndpoint).Port;
+        _ = Task.Run(async () =>
+        {
+            while (true)
+            {
+                System.Net.Sockets.TcpClient c;
+                try { c = await echo.AcceptTcpClientAsync(); } catch { return; }
+                _ = Task.Run(async () =>
+                {
+                    using var cs = c; var st = c.GetStream(); var b = new byte[65536]; int n;
+                    var first = await st.ReadAsync(b);
+                    var text = Encoding.ASCII.GetString(b, 0, first);
+                    if (text.StartsWith("GET /big"))
+                    {
+                        // 4 MB response for the slow-reader test: 30 s + 16 s allowed at 256 KB/s
+                        await st.WriteAsync(Encoding.ASCII.GetBytes("HTTP/1.1 200 OK\r\nContent-Length: 4194304\r\nConnection: close\r\n\r\n"));
+                        var chunk = new byte[1 << 20];
+                        for (int i = 0; i < 4; i++) await st.WriteAsync(chunk);
+                        return;
+                    }
+                    await st.WriteAsync(b.AsMemory(0, first));
+                    try { while ((n = await st.ReadAsync(b)) > 0) await st.WriteAsync(b.AsMemory(0, n)); } catch { }
+                });
+            }
+        });
+        rules.SslBypass.Add("127.0.0.1");
+        async Task<double> StalledBodySeconds()
+        {
+            using var tcp = new System.Net.Sockets.TcpClient();
+            await tcp.ConnectAsync("127.0.0.1", 19095);
+            var s = tcp.GetStream();
+            await s.WriteAsync(Encoding.ASCII.GetBytes($"POST http://127.0.0.1:{echoPort}/up HTTP/1.1\r\nHost: 127.0.0.1:{echoPort}\r\nContent-Length: 1000\r\n\r\n0123456789"));
+            var buf = new byte[4096];
+            var started = DateTime.UtcNow;
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+            try { while (await s.ReadAsync(buf, cts.Token) > 0) { } } catch { }
+            return (DateTime.UtcNow - started).TotalSeconds;
+        }
+        async Task<double> SlowReaderSeconds()
+        {
+            using var tcp = new System.Net.Sockets.TcpClient();
+            tcp.ReceiveBufferSize = 4096;
+            await tcp.ConnectAsync("127.0.0.1", 19095);
+            var s = tcp.GetStream();
+            await s.WriteAsync(Encoding.ASCII.GetBytes($"GET http://127.0.0.1:{echoPort}/big HTTP/1.1\r\nHost: 127.0.0.1:{echoPort}\r\n\r\n"));
+            var started = DateTime.UtcNow;
+            // Reads nothing; waits until the budget it holds is given back
+            while (DateTime.UtcNow - started < TimeSpan.FromSeconds(70))
+            {
+                await Task.Delay(1000);
+                if (DateTime.UtcNow - started > TimeSpan.FromSeconds(3) && TransferBudget.Held == 0) break;
+            }
+            return (DateTime.UtcNow - started).TotalSeconds;
+        }
+        // A TLS echo server, like the far end of a WebSocket or push connection
+        var tlsEcho = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
+        tlsEcho.Start();
+        var tlsPort = ((IPEndPoint)tlsEcho.LocalEndpoint).Port;
+        using var key = System.Security.Cryptography.ECDsa.Create();
+        var req = new System.Security.Cryptography.X509Certificates.CertificateRequest("CN=localhost", key, System.Security.Cryptography.HashAlgorithmName.SHA256);
+        var selfSigned = req.CreateSelfSigned(DateTimeOffset.Now.AddDays(-1), DateTimeOffset.Now.AddDays(1));
+        var serverCert = System.Security.Cryptography.X509Certificates.X509CertificateLoader.LoadPkcs12(selfSigned.Export(System.Security.Cryptography.X509Certificates.X509ContentType.Pfx), null);
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                using var c = await tlsEcho.AcceptTcpClientAsync();
+                using var tls = new System.Net.Security.SslStream(c.GetStream());
+                await tls.AuthenticateAsServerAsync(serverCert);
+                var b = new byte[4096]; int n;
+                while ((n = await tls.ReadAsync(b)) > 0) await tls.WriteAsync(b.AsMemory(0, n));
+            }
+            catch { }
+        });
+        async Task<bool> QuietTunnelStaysOpen()
+        {
+            using var tcp = new System.Net.Sockets.TcpClient();
+            await tcp.ConnectAsync("127.0.0.1", 19095);
+            var s = tcp.GetStream();
+            await s.WriteAsync(Encoding.ASCII.GetBytes($"CONNECT 127.0.0.1:{tlsPort} HTTP/1.1\r\nHost: 127.0.0.1:{tlsPort}\r\n\r\n"));
+            var buf = new byte[4096];
+            using var first = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            var n = await s.ReadAsync(buf, first.Token);
+            if (!Encoding.ASCII.GetString(buf, 0, n).Contains(" 200")) return false;
+            using var tls = new System.Net.Security.SslStream(s, false, (_, _, _, _) => true);
+            await tls.AuthenticateAsClientAsync("localhost");
+            await tls.WriteAsync(Encoding.ASCII.GetBytes("hello"));
+            using var second = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            n = await tls.ReadAsync(buf, second.Token);
+            await Task.Delay(TimeSpan.FromSeconds(45));
+            await tls.WriteAsync(Encoding.ASCII.GetBytes("still here"));
+            using var third = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            n = await tls.ReadAsync(buf, third.Token);
+            return Encoding.ASCII.GetString(buf, 0, n) == "still here";
+        }
+        var stalled = StalledBodySeconds();
+        var slow = SlowReaderSeconds();
+        var quiet = QuietTunnelStaysOpen();
+        bool quietOk;
+        try { quietOk = await quiet; } catch (Exception ex) { quietOk = false; Console.WriteLine($"  quiet tunnel: {ex.GetBaseException().Message}"); }
+        var stalledAfter = await stalled;
+        var slowAfter = await slow;
+        Check("Stalled request body is dropped", stalledAfter < 45, $"{stalledAfter:F0} s");
+        Check("Client that stops reading frees its budget", slowAfter < 60, $"{slowAfter:F0} s, {TransferBudget.Held} bytes held");
+        Check("Quiet tunnel stays open for 45 s", quietOk);
+        echo.Stop();
+        tlsEcho.Stop();
+
+        await Task.Delay(1000);
+        Check("Body budget returns to zero", TransferBudget.Held == 0, $"{TransferBudget.Held} bytes held");
+
         await Task.Delay(300);
         lock (flows) Check("Flows recorded", flows.Count >= 7, $"{flows.Count}");
         lock (log) Check("Script log", log.Any(l => l.Contains("patched")), string.Join(";", log));
