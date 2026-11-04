@@ -175,8 +175,10 @@ public static class SelfTest
         var tlsEcho = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
         tlsEcho.Start();
         var tlsPort = ((IPEndPoint)tlsEcho.LocalEndpoint).Port;
-        using var key = System.Security.Cryptography.ECDsa.Create();
-        var req = new System.Security.Cryptography.X509Certificates.CertificateRequest("CN=localhost", key, System.Security.Cryptography.HashAlgorithmName.SHA256);
+        // RSA: Windows TLS (SChannel) accepts it from a freshly made certificate
+        using var key = System.Security.Cryptography.RSA.Create(2048);
+        var req = new System.Security.Cryptography.X509Certificates.CertificateRequest("CN=localhost", key, System.Security.Cryptography.HashAlgorithmName.SHA256,
+            System.Security.Cryptography.RSASignaturePadding.Pkcs1);
         var selfSigned = req.CreateSelfSigned(DateTimeOffset.Now.AddDays(-1), DateTimeOffset.Now.AddDays(1));
         var serverCert = System.Security.Cryptography.X509Certificates.X509CertificateLoader.LoadPkcs12(selfSigned.Export(System.Security.Cryptography.X509Certificates.X509ContentType.Pfx), null);
         _ = Task.Run(async () =>
@@ -186,11 +188,14 @@ public static class SelfTest
                 using var c = await tlsEcho.AcceptTcpClientAsync();
                 using var tls = new System.Net.Security.SslStream(c.GetStream());
                 await tls.AuthenticateAsServerAsync(serverCert);
+                Console.WriteLine("  (TLS echo server: handshake done)");
                 var b = new byte[4096]; int n;
                 while ((n = await tls.ReadAsync(b)) > 0) await tls.WriteAsync(b.AsMemory(0, n));
             }
-            catch { }
+            catch (Exception ex) { Console.WriteLine($"  (TLS echo server: {ex.GetBaseException().Message})"); }
         });
+        var tunnelStage = "connect";
+        var tunnelStarted = DateTime.UtcNow;
         async Task<bool> QuietTunnelStaysOpen()
         {
             using var tcp = new System.Net.Sockets.TcpClient();
@@ -202,11 +207,15 @@ public static class SelfTest
             var n = await s.ReadAsync(buf, first.Token);
             if (!Encoding.ASCII.GetString(buf, 0, n).Contains(" 200")) return false;
             using var tls = new System.Net.Security.SslStream(s, false, (_, _, _, _) => true);
+            tunnelStage = "TLS handshake";
             await tls.AuthenticateAsClientAsync("localhost");
+            tunnelStage = "first echo";
             await tls.WriteAsync(Encoding.ASCII.GetBytes("hello"));
             using var second = new CancellationTokenSource(TimeSpan.FromSeconds(10));
             n = await tls.ReadAsync(buf, second.Token);
+            tunnelStage = "45 s of silence";
             await Task.Delay(TimeSpan.FromSeconds(45));
+            tunnelStage = "echo after the silence";
             await tls.WriteAsync(Encoding.ASCII.GetBytes("still here"));
             using var third = new CancellationTokenSource(TimeSpan.FromSeconds(5));
             n = await tls.ReadAsync(buf, third.Token);
@@ -216,7 +225,12 @@ public static class SelfTest
         var slow = SlowReaderSeconds();
         var quiet = QuietTunnelStaysOpen();
         bool quietOk;
-        try { quietOk = await quiet; } catch (Exception ex) { quietOk = false; Console.WriteLine($"  quiet tunnel: {ex.GetBaseException().Message}"); }
+        try { quietOk = await quiet; }
+        catch (Exception ex)
+        {
+            quietOk = false;
+            Console.WriteLine($"  quiet tunnel failed at {tunnelStage}, {(DateTime.UtcNow - tunnelStarted).TotalSeconds:F0} s: {ex.GetBaseException().Message}");
+        }
         var stalledAfter = await stalled;
         var slowAfter = await slow;
         Check("Stalled request body is dropped", stalledAfter < 45, $"{stalledAfter:F0} s");
