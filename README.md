@@ -16,17 +16,17 @@
   <img src="https://img.shields.io/badge/SwiftUI-macOS-1575F9?logo=swift&logoColor=white" alt="SwiftUI">
   <img src="https://img.shields.io/badge/.NET-10-512BD4?logo=dotnet&logoColor=white" alt=".NET 10">
   <img src="https://img.shields.io/badge/Avalonia-11-8B44AC" alt="Avalonia 11">
-  <a href="https://github.com/Bryal52/Snifix/releases/latest"><img src="https://img.shields.io/badge/%D0%B2%D0%B5%D1%80%D1%81%D0%B8%D1%8F-1.1.0-FFB52E" alt="Версия 1.1.0"></a>
+  <a href="https://github.com/Bryal52/Snifix/releases/latest"><img src="https://img.shields.io/badge/%D0%B2%D0%B5%D1%80%D1%81%D0%B8%D1%8F-1.0.0-FFB52E" alt="Версия 1.0.0"></a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/Bryal52/Snifix/releases/latest/download/Snifix-1.1.0.dmg"><img src="https://img.shields.io/badge/%D0%A1%D0%BA%D0%B0%D1%87%D0%B0%D1%82%D1%8C_%D0%B4%D0%BB%D1%8F_macOS-1.1.0-000000?style=for-the-badge&logo=apple&logoColor=white" alt="Скачать для macOS" height="36"></a>
+  <a href="https://github.com/Bryal52/Snifix/releases/latest/download/Snifix-1.0.0.dmg"><img src="https://img.shields.io/badge/%D0%A1%D0%BA%D0%B0%D1%87%D0%B0%D1%82%D1%8C_%D0%B4%D0%BB%D1%8F_macOS-1.0.0-000000?style=for-the-badge&logo=apple&logoColor=white" alt="Скачать для macOS" height="36"></a>
   &nbsp;
-  <a href="https://github.com/Bryal52/Snifix/releases/latest/download/Snifix-1.1.0-Setup.exe"><img src="https://img.shields.io/badge/%D0%A1%D0%BA%D0%B0%D1%87%D0%B0%D1%82%D1%8C_%D0%B4%D0%BB%D1%8F_Windows-1.1.0-0078D4?style=for-the-badge&logo=windows&logoColor=white" alt="Скачать для Windows" height="36"></a>
+  <a href="https://github.com/Bryal52/Snifix/releases/latest/download/Snifix-1.0.0-Setup.exe"><img src="https://img.shields.io/badge/%D0%A1%D0%BA%D0%B0%D1%87%D0%B0%D1%82%D1%8C_%D0%B4%D0%BB%D1%8F_Windows-1.0.0-0078D4?style=for-the-badge&logo=windows&logoColor=white" alt="Скачать для Windows" height="36"></a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/Bryal52/Snifix/releases/latest/download/Snifix-1.1.0-windows-x64.zip">Windows без установки (zip)</a> ·
+  <a href="https://github.com/Bryal52/Snifix/releases/latest/download/Snifix-1.0.0-windows-x64.zip">Windows без установки (zip)</a> ·
   <a href="https://github.com/Bryal52/Snifix/releases/latest/download/Snifix-Guide-RU.pdf">Инструкция со скриншотами (PDF)</a>
 </p>
 
@@ -114,6 +114,36 @@ dotnet run --project windows/Snifix.Windows -- --selftest
 ## Поддержать автора
 
 Кнопка **Donate** с чашкой кофе в правом нижнем углу окна показывает реквизиты. Донат не обязателен — Snifix бесплатный и останется бесплатным.
+
+## Безопасность
+
+Snifix видит весь трафик устройств, поэтому защита встроена в сам прокси.
+
+**Сертификат и ключ**
+- Корневой сертификат свой у каждой установки: создаётся на вашем компьютере и никуда не отправляется. На Mac ключ хранится в зашифрованном виде (AES‑256‑GCM, ключ шифрования — в Связке ключей), на Windows — защищён DPAPI.
+- Mac и Windows доверяют сертификату только для HTTPS. Отпечаток сертификата виден в окне Devices; там же сертификат можно заменить, а меню **Certificate → Remove Certificate and Keys…** убирает его полностью.
+- Сертификаты сайтов выпускаются только для правильных имён хостов. С серверами Snifix общается по TLS 1.2 или новее и проверяет их сертификаты.
+
+**Кто может пользоваться прокси**
+- Новое устройство в сети не может пользоваться прокси, пока вы не нажмёте **Allow** на плашке. Разрешение действует 30 дней. Если устройств больше пяти, остальные ждут в очереди.
+- Другие устройства не могут через Snifix достучаться до localhost вашего компьютера.
+- Тайм‑ауты и ограничение числа соединений с одного устройства защищают от зависших и «медленных» клиентов.
+
+**Память**
+- Тело одного запроса или ответа — до 256 МБ, сжатое тело распаковывается не больше чем до 64 МБ (защита от «zip‑бомб»).
+- Все тела в передаче вместе — до 1 ГБ, с одного устройства — до 256 МБ. Сверх этого Snifix отвечает 503, а не занимает всю память компьютера.
+- Сохранённые запросы — до 1 ГБ тел (на Mac меняется в Settings → List): у самых старых остаются заголовки, а тела удаляются.
+- Сообщения WebSocket — до 256 МБ на все соединения вместе, самые старые удаляются первыми.
+
+**Правила и скрипты**
+- Импортированные правила приходят выключенными, их нужно включить самому. Map Local из папки не выпускает за её пределы, в том числе по символическим ссылкам.
+- Скрипт работает не дольше 2 секунд. На Mac скрипты выполняются в отдельном процессе, который завершается, если скрипт завис.
+
+**Файлы**
+- Сессию можно сохранить с паролем (AES‑256‑GCM). Файлы с данными доступны только вашей учётной записи.
+- При экспорте в HAR Snifix может удалить токены: заголовки Authorization и Cookie, а также токены и пароли в адресе и в формах.
+
+Сейчас только на Mac: лимиты тел в передаче, лимит распаковки, лимит WebSocket, отдельный процесс для скриптов (на Windows скрипт останавливает сам движок Jint), сессии с паролем, экспорт в HAR, очередь запросов на доступ. В Windows‑версию они войдут позже.
 
 ## Важно
 

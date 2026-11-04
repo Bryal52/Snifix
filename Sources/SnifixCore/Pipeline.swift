@@ -63,6 +63,10 @@ final class ExchangeHandler: ChannelInboundHandler, RemovableChannelHandler {
     private var receiving = 0
     private var held = 0
     private var finished = false
+    /// Closes the exchange when its body stops arriving, so the budget it holds comes back.
+    private var bodyStall: Scheduled<Void>?
+    /// Other devices have their own share of the transfer budget; this computer uses the whole budget.
+    private var device: String? { client.isLocal ? nil : client.address }
     /// The client was refused at the request head; the rest of that request is dropped unread.
     private var refused = false
     private var idleTask: Scheduled<Void>?
@@ -86,21 +90,31 @@ final class ExchangeHandler: ChannelInboundHandler, RemovableChannelHandler {
     func handlerRemoved(context: ChannelHandlerContext) {
         idleTask?.cancel()
         self.context = nil
+        bodyStall?.cancel()
         finished = true
-        ProxyLimits.release(held)
+        ProxyLimits.release(held, device: device)
         held = 0; receiving = 0
     }
 
     private func take(_ n: Int) -> Bool {
-        guard ProxyLimits.reserve(n) else { return false }
+        guard ProxyLimits.reserve(n, device: device) else { return false }
         held += n
         return true
     }
 
     private func giveBack(_ n: Int) {
         guard !finished else { return }
-        ProxyLimits.release(n)
+        ProxyLimits.release(n, device: device)
         held -= n
+    }
+
+    /// Re-armed with every piece of the body: a body that stops arriving closes the connection (or the HTTP/2 stream).
+    private func armBodyStall(_ context: ChannelHandlerContext) {
+        bodyStall?.cancel()
+        bodyStall = context.eventLoop.scheduleTask(in: .seconds(ProxyLimits.bodyStallTimeout)) { [weak self] in
+            guard let self, self.head != nil else { return }
+            self.context?.close(promise: nil)
+        }
     }
 
     private func dropBody() {
@@ -134,6 +148,7 @@ final class ExchangeHandler: ChannelInboundHandler, RemovableChannelHandler {
             idleTask?.cancel()
             head = h
             dropBody()
+            armBodyStall(context)
             tooLarge = false
             overBudget = false
             refused = false
@@ -147,6 +162,7 @@ final class ExchangeHandler: ChannelInboundHandler, RemovableChannelHandler {
                 context.writeAndFlush(wrapOutboundOut(.head(HTTPResponseHead(version: h.version, status: .continue))), promise: nil)
             }
         case .body(var chunk):
+            armBodyStall(context)
             if refused || tooLarge || overBudget { return }
             // Past the limit the rest is dropped and the request is answered with 413
             if body.readableBytes + chunk.readableBytes > ProxyLimits.maxBody { tooLarge = true; dropBody(); return }
@@ -155,6 +171,7 @@ final class ExchangeHandler: ChannelInboundHandler, RemovableChannelHandler {
             receiving += chunk.readableBytes
             body.writeBuffer(&chunk)
         case .end:
+            bodyStall?.cancel()
             guard let h = head else { return }
             head = nil
             if refused { return }
@@ -177,7 +194,8 @@ final class ExchangeHandler: ChannelInboundHandler, RemovableChannelHandler {
                 return
             }
             if overBudget {
-                refuse(context: context, head: h, ProxyLimits.refusal(ProxyLimits.busy, status: 503))
+                let message = ProxyLimits.deviceFull(device) ? ProxyLimits.deviceBusy : ProxyLimits.busy
+                refuse(context: context, head: h, ProxyLimits.refusal(message, status: 503))
                 return
             }
             queue.append((h, body, receiving))
@@ -320,10 +338,15 @@ final class ExchangeHandler: ChannelInboundHandler, RemovableChannelHandler {
         }
         // The body counts against the shared budget until it has left (a client that reads slowly keeps holding it)
         let size = noBody || finished ? 0 : response.body.count
-        ProxyLimits.hold(size)
+        ProxyLimits.hold(size, device: device)
         held += size
         let done = context.writeAndFlush(wrapOutboundOut(.end(trailers)))
-        done.whenComplete { [weak self] _ in self?.giveBack(size) }
+        // A client that stops reading is dropped: 30 s plus the time 256 KB/s needs for the body
+        let channel = context.channel
+        let stall = context.eventLoop.scheduleTask(in: .seconds(ProxyLimits.bodyStallTimeout + Int64(size / 262_144))) {
+            channel.close(promise: nil)
+        }
+        done.whenComplete { [weak self] _ in stall.cancel(); self?.giveBack(size) }
         if !keepAlive { done.whenComplete { _ in context.close(promise: nil) } }
         return done
     }

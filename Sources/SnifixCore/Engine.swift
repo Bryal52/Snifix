@@ -485,25 +485,54 @@ enum ProxyLimits {
     /// Bodies held by all connections together while they are received, processed and sent (1 GB).
     /// Past it new body data is refused, so many parallel uploads or downloads cannot use up the Mac's memory.
     static let bufferLimit = NIOLockedValueBox(1024 * 1024 * 1024)
-    private static let buffered = NIOLockedValueBox(0)
+    /// Share of that budget one other device may hold, so a single device cannot block the rest.
+    static let deviceShare = 256 * 1024 * 1024
+    private struct Buffered { var total = 0; var byDevice: [String: Int] = [:] }
+    private static let buffered = NIOLockedValueBox(Buffered())
     static let busy = "Snifix is already holding 1 GB of bodies in transfer for all devices together. Try again in a moment."
+    static let deviceBusy = "this device already has 256 MB of bodies in transfer through Snifix. Try again in a moment."
+    /// A request body that stops arriving, or a response the client stops reading, frees its budget after this.
+    static let bodyStallTimeout: Int64 = 30
 
-    /// Takes `n` bytes of the shared budget; false when it would pass the limit.
-    static func reserve(_ n: Int) -> Bool {
+    /// Takes `n` bytes of the shared budget (and of `device`'s share, for other devices); false when it would pass a limit.
+    static func reserve(_ n: Int, device: String? = nil) -> Bool {
         let limit = bufferLimit.withLockedValue { $0 }
         return buffered.withLockedValue { b in
-            guard b + n <= limit else { return false }
-            b += n
+            guard b.total + n <= limit else { return false }
+            if let device {
+                guard b.byDevice[device, default: 0] + n <= deviceShare else { return false }
+                b.byDevice[device, default: 0] += n
+            }
+            b.total += n
             return true
         }
     }
 
     /// Counts bytes that are already in memory (a response being sent), without a limit check.
-    static func hold(_ n: Int) { buffered.withLockedValue { $0 += n } }
+    static func hold(_ n: Int, device: String? = nil) {
+        buffered.withLockedValue { b in
+            b.total += n
+            if let device { b.byDevice[device, default: 0] += n }
+        }
+    }
 
-    static func release(_ n: Int) { buffered.withLockedValue { $0 = max(0, $0 - n) } }
+    static func release(_ n: Int, device: String? = nil) {
+        buffered.withLockedValue { b in
+            b.total = max(0, b.total - n)
+            if let device {
+                let left = b.byDevice[device, default: 0] - n
+                b.byDevice[device] = left > 0 ? left : nil
+            }
+        }
+    }
 
-    static var bufferedBytes: Int { buffered.withLockedValue { $0 } }
+    /// Whether `device` has used up its share (to tell it apart from the whole budget being full).
+    static func deviceFull(_ device: String?) -> Bool {
+        guard let device else { return false }
+        return buffered.withLockedValue { $0.byDevice[device, default: 0] } >= deviceShare / 2
+    }
+
+    static var bufferedBytes: Int { buffered.withLockedValue { $0.total } }
     /// Seconds a new connection has to send its first request; idle keep-alive connections close after the second value.
     static let headerTimeout: Int64 = 15
     static let keepAliveTimeout: Int64 = 120
@@ -553,6 +582,7 @@ public enum ProxyLimitsForTest {
     public static var bufferedBytes: Int { ProxyLimits.bufferedBytes }
     public static func setBufferLimit(_ n: Int) { ProxyLimits.bufferLimit.withLockedValue { $0 = n } }
     public static var webSocketStored: Int { WebSocketStore.total }
+    public static var webSocketPending: Int { WebSocketStore.pendingBytes }
     public static func setWebSocketLimit(_ n: Int) { WebSocketStore.limit.withLockedValue { $0 = n } }
 }
 #endif

@@ -370,6 +370,7 @@ let decoded = flows.first { $0.request.host == "www.google.com" }.flatMap { f in
 check("Тело распаковано", decoded.map { String(decoding: $0, as: UTF8.self).lowercased().contains("<html") } ?? false)
 Thread.sleep(forTimeInterval: 1)
 check("Body budget returns to zero after all requests", ProxyLimitsForTest.bufferedBytes == 0, "\(ProxyLimitsForTest.bufferedBytes) bytes held")
+check("WebSocket frame buffer returns to zero", ProxyLimitsForTest.webSocketPending == 0, "\(ProxyLimitsForTest.webSocketPending) bytes")
 engine.stop()
 try? FileManager.default.removeItem(at: dir)
 print(failures == 0 ? "Всё прошло" : "Ошибок: \(failures)")

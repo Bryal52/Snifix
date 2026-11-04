@@ -190,6 +190,23 @@ enum WebSocketStore {
     }
 
     static var total: Int { state.withLockedValue { $0.total } }
+
+    /// Frames still being received, on all connections together (256 MB). A frame that does not fit is relayed
+    /// without being shown, so a sender that stops halfway through a big frame cannot block requests.
+    static let pendingLimit = 256 * 1024 * 1024
+    private static let pending = NIOLockedValueBox(0)
+
+    static func reservePending(_ n: Int) -> Bool {
+        pending.withLockedValue { p in
+            guard p + n <= pendingLimit else { return false }
+            p += n
+            return true
+        }
+    }
+
+    static func releasePending(_ n: Int) { pending.withLockedValue { $0 = max(0, $0 - n) } }
+
+    static var pendingBytes: Int { pending.withLockedValue { $0 } }
 }
 
 /// Relays raw bytes and parses WebSocket frames from them for display.
@@ -200,7 +217,7 @@ final class FrameRelay: ChannelInboundHandler, RemovableChannelHandler {
     private let recorder: FlowRecorder?
     private var pending = ByteBuffer()
     private var tooBig = false
-    /// Bytes of the transfer budget held by frames not parsed yet.
+    /// Bytes of frames not parsed yet (counted by the WebSocket store, not the transfer budget).
     private var reserved = 0
     /// This direction's kept payloads in the WebSocket store; they leave it when the connection ends.
     private let storeOwner = WebSocketStore.newOwner()
@@ -217,9 +234,9 @@ final class FrameRelay: ChannelInboundHandler, RemovableChannelHandler {
         Backpressure.pauseIfNeeded(reading: context.channel, writingTo: peer)
         guard recorder != nil, !tooBig else { return }
         // A frame this large, or one that does not fit the shared budget, is relayed but no longer parsed for display
-        guard pending.readableBytes + buffer.readableBytes <= 32 * 1024 * 1024, ProxyLimits.reserve(buffer.readableBytes) else {
+        guard pending.readableBytes + buffer.readableBytes <= 32 * 1024 * 1024, WebSocketStore.reservePending(buffer.readableBytes) else {
             tooBig = true
-            ProxyLimits.release(pending.readableBytes)
+            WebSocketStore.releasePending(pending.readableBytes)
             reserved -= pending.readableBytes
             pending.clear()
             return
@@ -238,7 +255,7 @@ final class FrameRelay: ChannelInboundHandler, RemovableChannelHandler {
         }
         // Parsed bytes left the transfer buffer; kept payloads are counted by the WebSocket store instead
         let parsed = before - pending.readableBytes
-        ProxyLimits.release(parsed)
+        WebSocketStore.releasePending(parsed)
         reserved -= parsed
     }
 
@@ -248,7 +265,7 @@ final class FrameRelay: ChannelInboundHandler, RemovableChannelHandler {
     }
 
     func handlerRemoved(context: ChannelHandlerContext) {
-        ProxyLimits.release(reserved)
+        WebSocketStore.releasePending(reserved)
         reserved = 0
         WebSocketStore.forget(owner: storeOwner)
     }

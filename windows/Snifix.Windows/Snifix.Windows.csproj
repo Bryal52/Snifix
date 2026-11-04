@@ -6,7 +6,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>Snifix</AssemblyName>
     <RootNamespace>Snifix</RootNamespace>
-    <Version>1.1.0</Version>
+    <Version>1.0.0</Version>
     <ApplicationIcon>Assets\snifix.ico</ApplicationIcon>
     <AvaloniaUseCompiledBindingsByDefault>false</AvaloniaUseCompiledBindingsByDefault>
     <BuiltInComInteropSupport>true</BuiltInComInteropSupport>

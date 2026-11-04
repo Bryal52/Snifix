@@ -2,7 +2,7 @@
 # Builds Snifix.app, signs it locally and installs it into /Applications.
 set -e
 cd "$(dirname "$0")"
-VERSION=1.1.0
+VERSION=1.0.0
 
 swift build -c release --product Snifix
 
