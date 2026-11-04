@@ -57,6 +57,55 @@
       <Setter Property="Background" Value="#FFD84A"/>
     </Style>
 
+    <!-- Donate: copy turns green after copying, close is a soft capsule with a gold rim on hover -->
+    <Style Selector="Button.copy">
+      <Setter Property="Width" Value="96"/>
+      <Setter Property="HorizontalContentAlignment" Value="Center"/>
+      <Setter Property="CornerRadius" Value="13"/>
+      <Setter Property="RenderTransform" Value="scale(1)"/>
+      <Setter Property="Transitions">
+        <Transitions>
+          <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.18"/>
+        </Transitions>
+      </Setter>
+    </Style>
+    <Style Selector="Button.copy:pointerover">
+      <Setter Property="RenderTransform" Value="scale(1.04)"/>
+    </Style>
+    <Style Selector="Button.copy:pressed">
+      <Setter Property="RenderTransform" Value="scale(0.94)"/>
+    </Style>
+    <Style Selector="Button.copied /template/ ContentPresenter">
+      <Setter Property="Background" Value="#2FBF6A"/>
+      <Setter Property="Foreground" Value="White"/>
+    </Style>
+    <Style Selector="Button.capsule">
+      <Setter Property="Background" Value="#14FFFFFF"/>
+      <Setter Property="Foreground" Value="#B9B5C6"/>
+      <Setter Property="BorderBrush" Value="#26FFCC33"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="CornerRadius" Value="16"/>
+      <Setter Property="Padding" Value="28,7"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="RenderTransform" Value="scale(1)"/>
+      <Setter Property="Transitions">
+        <Transitions>
+          <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.18"/>
+        </Transitions>
+      </Setter>
+    </Style>
+    <Style Selector="Button.capsule:pointerover">
+      <Setter Property="RenderTransform" Value="scale(1.03)"/>
+    </Style>
+    <Style Selector="Button.capsule:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="#24FFFFFF"/>
+      <Setter Property="BorderBrush" Value="#99FFCC33"/>
+      <Setter Property="Foreground" Value="White"/>
+    </Style>
+    <Style Selector="Button.capsule:pressed">
+      <Setter Property="RenderTransform" Value="scale(0.95)"/>
+    </Style>
+
     <!-- Category chips -->
     <Style Selector="ToggleButton.chip">
       <Setter Property="Background" Value="Transparent"/>

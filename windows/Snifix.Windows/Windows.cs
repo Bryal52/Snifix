@@ -359,8 +359,8 @@ public sealed class DonateWindow : Window
         });
         p.Children.Add(Card("VISA", "4916 9903 0007 3175", "#1A3390", "#2E6BD9"));
         p.Children.Add(Card("Mastercard", "5321 5400 1305 0170", "#29242F", "#524760"));
-        var close = Ui.Button("Close", Close);
-        close.HorizontalAlignment = HorizontalAlignment.Center;
+        var close = new Button { Content = "Close", Classes = { "capsule" }, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 4, 0, 0) };
+        close.Click += (_, _) => Close();
         p.Children.Add(close);
         Content = p;
         Opened += (_, _) => { cat.Opacity = 1; cat.RenderTransform = new ScaleTransform(1, 1); };
@@ -383,12 +383,14 @@ public sealed class DonateWindow : Window
                     new Avalonia.Controls.Shapes.Ellipse { Width = 20, Height = 20, Fill = new SolidColorBrush(Color.Parse("#E6F79E1B")), [Canvas.LeftProperty] = 12.0 },
                 },
             };
-        var copy = Ui.Button("Copy", () => { }, gold: true);
+        var copy = new Button { Content = "Copy", Classes = { "tool", "gold", "copy" } };
         copy.Click += async (_, _) =>
         {
             if (Clipboard != null) await Clipboard.SetTextAsync(number.Replace(" ", ""));
-            copy.Content = "Copied ✓";
-            await Task.Delay(1400);
+            copy.Content = "✓ Copied";
+            copy.Classes.Add("copied");
+            await Task.Delay(1600);
+            copy.Classes.Remove("copied");
             copy.Content = "Copy";
         };
         var right = new StackPanel { Spacing = 8, HorizontalAlignment = HorizontalAlignment.Right };

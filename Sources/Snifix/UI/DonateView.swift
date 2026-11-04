@@ -72,8 +72,8 @@ struct DonateView: View {
             }
             Button("Close") { dismiss() }
                 .keyboardShortcut(.cancelAction)
-                .buttonStyle(.borderless)
-                .foregroundStyle(.secondary)
+                .buttonStyle(CapsuleButtonStyle())
+                .padding(.top, 2)
         }
         .padding(26)
         .frame(width: 400)
@@ -99,25 +99,87 @@ private struct CardTile: View {
             Spacer()
             VStack(alignment: .trailing, spacing: 8) {
                 BrandMark(brand: card.brand)
-                Button {
+                CopyButton(copied: copied) {
                     copy()
-                    withAnimation(.spring(response: 0.3)) { copied = true }
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) { withAnimation { copied = false } }
-                } label: {
-                    Label(copied ? "Copied" : "Copy", systemImage: copied ? "checkmark" : "doc.on.doc")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.black.opacity(0.85))
-                        .padding(.horizontal, 8).padding(.vertical, 3)
-                        .background(Capsule().fill(Theme.goldGradient))
-                        .contentTransition(.symbolEffect(.replace))
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.6)) { copied = true }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
+                        withAnimation(.spring(response: 0.45, dampingFraction: 0.8)) { copied = false }
+                    }
                 }
-                .buttonStyle(.plain)
             }
         }
         .padding(14)
         .background(RoundedRectangle(cornerRadius: 14, style: .continuous)
             .fill(LinearGradient(colors: card.colors, startPoint: .topLeading, endPoint: .bottomTrailing)))
         .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(.white.opacity(0.12)))
+    }
+}
+
+/// Fixed width, so the capsule never lags behind the label; turns green with a check after copying.
+private struct CopyButton: View {
+    let copied: Bool
+    let action: () -> Void
+    @UIState private var hover = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 5) {
+                Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                    .font(.system(size: 10.5, weight: .bold))
+                    .contentTransition(.symbolEffect(.replace))
+                Text(copied ? "Copied" : "Copy")
+                    .font(.system(size: 11.5, weight: .semibold))
+                    .contentTransition(.opacity)
+            }
+            .foregroundStyle(copied ? Color.white : Color.black.opacity(0.85))
+            .frame(width: 86, height: 26)
+            .background {
+                Capsule()
+                    .fill(copied ? AnyShapeStyle(LinearGradient(colors: [Color(red: 0.25, green: 0.78, blue: 0.45), Color(red: 0.13, green: 0.6, blue: 0.35)],
+                                                               startPoint: .top, endPoint: .bottom))
+                                 : AnyShapeStyle(Theme.goldGradient))
+            }
+            .overlay(Capsule().strokeBorder(.white.opacity(hover ? 0.45 : 0.15)))
+            .shadow(color: (copied ? Color.green : Theme.amber).opacity(hover || copied ? 0.55 : 0.25), radius: hover || copied ? 8 : 4)
+            .scaleEffect(copied ? 1.06 : hover ? 1.03 : 1)
+            .contentShape(Capsule())
+        }
+        .buttonStyle(PressStyle())
+        .onHover { h in withAnimation(.easeOut(duration: 0.15)) { hover = h } }
+    }
+}
+
+/// Shrinks a little while pressed.
+struct PressStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.94 : 1)
+            .animation(.spring(response: 0.25, dampingFraction: 0.6), value: configuration.isPressed)
+    }
+}
+
+/// Soft capsule with a gold rim on hover.
+struct CapsuleButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        CapsuleButtonBody(configuration: configuration)
+    }
+
+    private struct CapsuleButtonBody: View {
+        let configuration: Configuration
+        @UIState private var hover = false
+
+        var body: some View {
+            configuration.label
+                .font(.system(size: 12.5, weight: .semibold))
+                .foregroundStyle(hover ? Color.primary : Color.secondary)
+                .padding(.horizontal, 26).padding(.vertical, 7)
+                .background(Capsule().fill(Color.primary.opacity(hover ? 0.12 : 0.06)))
+                .overlay(Capsule().strokeBorder(Theme.gold.opacity(hover ? 0.6 : 0.15), lineWidth: 1))
+                .scaleEffect(configuration.isPressed ? 0.95 : hover ? 1.03 : 1)
+                .contentShape(Capsule())
+                .onHover { h in withAnimation(.easeOut(duration: 0.18)) { hover = h } }
+                .animation(.spring(response: 0.25, dampingFraction: 0.6), value: configuration.isPressed)
+        }
     }
 }
 
