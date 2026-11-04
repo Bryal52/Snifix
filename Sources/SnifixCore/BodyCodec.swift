@@ -2,6 +2,9 @@ import Foundation
 import Compression
 
 public enum BodyCodec {
+    /// Decompression stops here: a small gzip/brotli "bomb" must not become gigabytes in memory.
+    static let maxDecoded = 64 * 1024 * 1024
+
     /// Body with Content-Encoding (gzip, deflate, br) removed; the original data when it cannot be decoded.
     public static func decoded(_ body: Data, headers: [HTTPHeader]) -> Data {
         guard !body.isEmpty, let enc = headers["Content-Encoding"]?.lowercased().trimmingCharacters(in: .whitespaces) else {
@@ -54,7 +57,7 @@ public enum BodyCodec {
                 let status = compression_stream_process(stream, Int32(COMPRESSION_STREAM_FINALIZE.rawValue))
                 result.append(out, count: chunk - stream.pointee.dst_size)
                 switch status {
-                case COMPRESSION_STATUS_OK: if result.count > 512 * 1024 * 1024 { return nil }
+                case COMPRESSION_STATUS_OK: if result.count > maxDecoded { return nil }
                 case COMPRESSION_STATUS_END: return result
                 default: return result.isEmpty ? nil : result
                 }

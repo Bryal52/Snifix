@@ -142,7 +142,11 @@ public final class ProxyEngine: @unchecked Sendable {
             .serverChannelOption(ChannelOptions.socketOption(.so_reuseaddr), value: 1)
             .childChannelOption(ChannelOptions.socketOption(.tcp_nodelay), value: 1)
             .childChannelInitializer { [self] channel in
-                channel.eventLoop.makeCompletedFuture {
+                // Too many connections from one address (slowloris, scans) are refused right away
+                let address = channel.remoteAddress?.ipAddress ?? "?"
+                guard admit(address) else { return channel.close() }
+                channel.closeFuture.whenComplete { [self] _ in release(address) }
+                return channel.eventLoop.makeCompletedFuture {
                     try ProxyPipeline.installHTTP(on: channel, engine: self, scheme: "http", target: nil,
                                                   client: ClientResolver.resolve(channel: channel))
                 }
@@ -156,6 +160,28 @@ public final class ProxyEngine: @unchecked Sendable {
     }
 
     // MARK: - Decisions used by the pipeline
+
+    private let connections = NIOLockedValueBox<[String: Int]>([:])
+
+    private func admit(_ address: String) -> Bool {
+        let local = address == "127.0.0.1" || address == "::1" || NetworkInfo.localAddresses().contains(address)
+        let s = settings
+        let known = local || s.remoteAccess == .always || s.approvedClients.contains(address)
+        let limit = local ? ProxyLimits.maxConnectionsLocal : known ? ProxyLimits.maxConnectionsAllowed : ProxyLimits.maxConnectionsUnknown
+        return connections.withLockedValue { c in
+            let n = c[address, default: 0]
+            guard n < limit else { return false }
+            c[address] = n + 1
+            return true
+        }
+    }
+
+    private func release(_ address: String) {
+        connections.withLockedValue { c in
+            let n = (c[address] ?? 1) - 1
+            c[address] = n > 0 ? n : nil
+        }
+    }
 
     /// Whether a client may use the proxy. This computer and Android over USB always may;
     /// other devices must be on the local network and, in "ask" mode, allowed by the user.
@@ -250,6 +276,7 @@ public final class ProxyEngine: @unchecked Sendable {
         var config = TLSConfiguration.makeClientConfiguration()
         config.applicationProtocols = allowH2 ? ["h2", "http/1.1"] : ["http/1.1"]
         config.certificateVerification = verify ? .fullVerification : .none
+        config.minimumTLSVersion = .tlsv12
         let c = try NIOSSLContext(configuration: config)
         tlsClientContexts.withLockedValue { $0[key] = c }
         return c
@@ -450,6 +477,24 @@ struct TrustState {
 enum ProxyLimits {
     /// Largest request or response body Snifix keeps in memory.
     static let maxBody = 256 * 1024 * 1024
+    /// Seconds a new connection has to send its first request; idle keep-alive connections close after the second value.
+    static let headerTimeout: Int64 = 15
+    static let keepAliveTimeout: Int64 = 120
+    /// Open connections per other device (allowed), per device not allowed yet, and from this computer.
+    static let maxConnectionsAllowed = 256
+    static let maxConnectionsUnknown = 8
+    static let maxConnectionsLocal = 2048
+
+    /// Host names Snifix makes certificates for: letters, digits, "-", "_" and dots, or an IP address.
+    static func isValidHost(_ host: String) -> Bool {
+        guard !host.isEmpty, host.utf8.count <= 253 else { return false }
+        if host.contains(":") { return host.allSatisfy { $0.isHexDigit || $0 == ":" || $0 == "." } }
+        let labels = host.split(separator: ".", omittingEmptySubsequences: false)
+        return labels.allSatisfy { label in
+            !label.isEmpty && label.utf8.count <= 63
+                && label.allSatisfy { ($0.isASCII && ($0.isLetter || $0.isNumber)) || $0 == "-" || $0 == "_" }
+        }
+    }
 
     /// Other devices must not reach services that listen only on this computer.
     static func isLoopback(_ host: String) -> Bool {
@@ -470,10 +515,13 @@ enum ProxyLimits {
     static let notAllowed = "this device is not allowed to use the proxy. Allow it in Snifix on the computer (a banner appears there), then try again."
 }
 
+#if DEBUG
 // Used by snifix-selftest
 extension ProxyEngine {
     public func allowsForTest(_ client: ClientInfo) -> Bool { allows(client, userAgent: nil) }
 }
 public enum ProxyLimitsForTest {
     public static func isLoopback(_ host: String) -> Bool { ProxyLimits.isLoopback(host) }
+    public static func isValidHost(_ host: String) -> Bool { ProxyLimits.isValidHost(host) }
 }
+#endif

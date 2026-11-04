@@ -24,6 +24,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// SNIFIX_SNAPSHOT=/path/dir saves PNGs of the open windows after SNIFIX_SNAPSHOT_DELAY seconds (for checking the UI).
     private func scheduleSnapshot() {
+        #if DEBUG
         let env = ProcessInfo.processInfo.environment
         guard let dir = env["SNIFIX_SNAPSHOT"] else { return }
         let delay = Double(env["SNIFIX_SNAPSHOT_DELAY"] ?? "6") ?? 6
@@ -78,6 +79,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if env["SNIFIX_SNAPSHOT_QUIT"] != nil { NSApp.terminate(nil) }
             }
         }
+        #endif
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -162,7 +164,9 @@ struct SnifixCommands: Commands {
                 let panel = NSSavePanel()
                 panel.nameFieldStringValue = "Snifix.har"
                 if panel.runModal() == .OK, let url = panel.url {
-                    try? Export.har(model.rows.compactMap { model.flows[$0.id] }).write(to: url)
+                    let redact = HARPrompt.askRedact()
+                    guard let redact else { return }
+                    SecureFile.write(Export.har(model.rows.compactMap { model.flows[$0.id] }, redactSecrets: redact), to: url)
                 }
             }
         }
@@ -201,6 +205,7 @@ struct SnifixCommands: Commands {
         }
         CommandMenu("Certificate") {
             Button("Install on This Mac…") { model.trustCertificateOnMac() }
+            Button("Remove Certificate and Keys…") { model.removeCertificate() }
             Button("Connect iPhone…") { openWindow(id: "devices") }
             Button("Connect Android…") { openWindow(id: "devices") }
             Divider()
@@ -245,6 +250,24 @@ enum PasswordPrompt {
             let mismatch = NSAlert()
             mismatch.messageText = "The passwords do not match"
             mismatch.runModal()
+        }
+    }
+}
+
+/// HAR files are made to be shared, so offer to blank out tokens and cookies first.
+@MainActor
+enum HARPrompt {
+    static func askRedact() -> Bool? {
+        let alert = NSAlert()
+        alert.messageText = "Remove tokens and cookies from the HAR file?"
+        alert.informativeText = "HAR files are often sent to others. Snifix can blank out Authorization, Cookie, Set-Cookie and API key headers. Bodies are kept as they are."
+        alert.addButton(withTitle: "Remove Secrets")
+        alert.addButton(withTitle: "Keep Everything")
+        alert.addButton(withTitle: "Cancel")
+        switch alert.runModal() {
+        case .alertFirstButtonReturn: return true
+        case .alertSecondButtonReturn: return false
+        default: return nil
         }
     }
 }

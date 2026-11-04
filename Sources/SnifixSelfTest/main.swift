@@ -242,6 +242,48 @@ check("IP with a matching certificate works", code == 0 && !out.hasSuffix("502")
 (out, code) = curl(["https://\(resolve("www.google.com"))/"])
 check("IP with someone else's certificate is refused", out.contains("502") && out.contains("failed verification"), String(out.prefix(300)))
 
+// A connection that never sends a request is closed (slowloris)
+func secondsUntilClosed() -> Double {
+    let fd = socket(AF_INET, SOCK_STREAM, 0)
+    defer { close(fd) }
+    var addr = sockaddr_in()
+    addr.sin_family = sa_family_t(AF_INET)
+    addr.sin_port = in_port_t(19090).bigEndian
+    addr.sin_addr.s_addr = inet_addr("127.0.0.1")
+    var tv = timeval(tv_sec: 25, tv_usec: 0)
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+    let ok = withUnsafePointer(to: &addr) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { connect(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) } }
+    guard ok == 0 else { return -1 }
+    let start = Date()
+    var byte: UInt8 = 0
+    _ = recv(fd, &byte, 1, 0)
+    return Date().timeIntervalSince(start)
+}
+let idle = secondsUntilClosed()
+check("Silent connection is closed after 15 s", idle > 13 && idle < 20, "\(idle)s")
+
+check("Host names are validated", ProxyLimitsForTest.isValidHost("api.example.com") && ProxyLimitsForTest.isValidHost("1.2.3.4")
+      && !ProxyLimitsForTest.isValidHost("") && !ProxyLimitsForTest.isValidHost("*.evil.com") && !ProxyLimitsForTest.isValidHost("a b")
+      && !ProxyLimitsForTest.isValidHost(String(repeating: "a", count: 300)))
+
+(out, code) = curl(["https://tls-v1-0.badssl.com:1010/"])
+check("Servers with only TLS 1.0 are refused", out.contains("502"), String(out.prefix(200)))
+
+let harFlows = sink.lock.withLock { Array(sink.flows.values) }
+var tokenFlow = harFlows.first!
+tokenFlow.request.headers.append(HTTPHeader("Authorization", "Bearer secret-token"))
+let har = String(decoding: Export.har([tokenFlow], redactSecrets: true), as: UTF8.self)
+check("HAR export removes tokens", !har.contains("secret-token") && har.contains("[removed by Snifix]"))
+
+// A gzip "bomb": 300 MB of zeros compressed to a few hundred KB is not unpacked past the limit
+let bombPath = dir.appendingPathComponent("bomb.gz").path
+let gz = Process(); gz.executableURL = URL(fileURLWithPath: "/bin/sh")
+gz.arguments = ["-c", "head -c 314572800 /dev/zero | gzip -9 > \"$0\"", bombPath]
+try? gz.run(); gz.waitUntilExit()
+let bomb = (try? Data(contentsOf: URL(fileURLWithPath: bombPath))) ?? Data()
+let unpacked = BodyCodec.decoded(bomb, headers: [HTTPHeader("Content-Encoding", "gzip")])
+check("Decompression bomb is not unpacked", !bomb.isEmpty && unpacked.count <= bomb.count, "\(bomb.count) → \(unpacked.count)")
+
 // A new device (other address) that has not trusted the CA: every host fails
 _ = curlNoCA("https://www.example.org/", proxy: lan)
 _ = curlNoCA("https://www.wikipedia.org/", proxy: lan)

@@ -15,7 +15,8 @@ public final class CertificateAuthority: @unchecked Sendable {
     // One key for every leaf certificate: signing is cheap, generating keys is not needed per host
     private let leafKey = P256.Signing.PrivateKey()
     private let leafSSLKey: NIOSSLPrivateKey
-    private let contexts = NIOLockedValueBox<[String: NIOSSLContext]>([:])
+    /// TLS contexts per host, oldest dropped past 1000 so random host names cannot grow memory without end.
+    private let contexts = NIOLockedValueBox<(map: [String: NIOSSLContext], order: [String])>(([:], []))
 
     /// Loads the CA from `directory` or creates a new one there.
     /// `name` is used only when a new CA is created; test copies pass their own so phones can tell them apart.
@@ -117,15 +118,24 @@ public final class CertificateAuthority: @unchecked Sendable {
     /// Server-side TLS context presenting a certificate for `host`, cached per host.
     public func serverContext(for host: String, http2: Bool) throws -> NIOSSLContext {
         let key = host.lowercased() + (http2 ? "|h2" : "")
-        if let cached = contexts.withLockedValue({ $0[key] }) { return cached }
+        guard ProxyLimits.isValidHost(host) else { throw NIOSSLError.unableToAllocateBoringSSLObject }
+        if let cached = contexts.withLockedValue({ $0.map[key] }) { return cached }
         let leaf = try makeLeaf(for: host.lowercased())
         var config = TLSConfiguration.makeServerConfiguration(
             certificateChain: [.certificate(leaf), .certificate(caSSLCertificate)],
             privateKey: .privateKey(leafSSLKey)
         )
         config.applicationProtocols = http2 ? ["h2", "http/1.1"] : ["http/1.1"]
+        config.minimumTLSVersion = .tlsv12
         let context = try NIOSSLContext(configuration: config)
-        contexts.withLockedValue { $0[key] = context }
+        contexts.withLockedValue { c in
+            if c.map[key] == nil { c.order.append(key) }
+            c.map[key] = context
+            if c.order.count > 1000 {
+                for old in c.order.prefix(100) { c.map[old] = nil }
+                c.order.removeFirst(100)
+            }
+        }
         return context
     }
 

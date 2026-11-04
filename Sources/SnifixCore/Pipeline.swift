@@ -56,6 +56,9 @@ final class ExchangeHandler: ChannelInboundHandler, RemovableChannelHandler {
     private var context: ChannelHandlerContext?
     private var pool: UpstreamPool?
     private var tooLarge = false
+    /// The client was refused at the request head; the rest of that request is dropped unread.
+    private var refused = false
+    private var idleTask: Scheduled<Void>?
     private let ownsPool: Bool
     /// One HTTP/2 stream: no Connection headers, no CONNECT or upgrades.
     private let http2: Bool
@@ -69,9 +72,24 @@ final class ExchangeHandler: ChannelInboundHandler, RemovableChannelHandler {
     func handlerAdded(context: ChannelHandlerContext) {
         self.context = context
         if pool == nil { pool = UpstreamPool(eventLoop: context.eventLoop, engine: engine, remoteClient: !client.isLocal) }
+        // A client that opens a connection and never sends a request (slowloris) is dropped
+        armIdle(seconds: ProxyLimits.headerTimeout)
     }
 
-    func handlerRemoved(context: ChannelHandlerContext) { self.context = nil }
+    func handlerRemoved(context: ChannelHandlerContext) {
+        idleTask?.cancel()
+        self.context = nil
+    }
+
+    /// Closes the connection if no request arrives in time; HTTP/2 streams are managed by their connection.
+    private func armIdle(seconds: Int64) {
+        guard !http2, let context else { return }
+        idleTask?.cancel()
+        idleTask = context.eventLoop.scheduleTask(in: .seconds(seconds)) { [weak self] in
+            guard let self, !self.busy, self.head == nil, self.queue.isEmpty else { return }
+            self.context?.close(promise: nil)
+        }
+    }
 
     func channelInactive(context: ChannelHandlerContext) {
         if ownsPool { pool?.closeAll() }
@@ -85,23 +103,34 @@ final class ExchangeHandler: ChannelInboundHandler, RemovableChannelHandler {
     func channelRead(context: ChannelHandlerContext, data: NIOAny) {
         switch unwrapInboundIn(data) {
         case .head(let h):
+            idleTask?.cancel()
             head = h
             body.clear()
             tooLarge = false
+            refused = false
+            // Checked before any body is read, so a device that is not allowed cannot fill the memory
+            if target == nil && !engine.allows(client, userAgent: h.headers.first(name: "user-agent")) {
+                refused = true
+                refuse(context: context, head: h, ProxyLimits.refusal(ProxyLimits.notAllowed))
+                return
+            }
             if !http2 && h.headers[canonicalForm: "expect"].contains(where: { $0.lowercased() == "100-continue" }) {
                 context.writeAndFlush(wrapOutboundOut(.head(HTTPResponseHead(version: h.version, status: .continue))), promise: nil)
             }
         case .body(var chunk):
+            if refused { return }
             // Past the limit the rest is dropped and the request is answered with 413
             if body.readableBytes + chunk.readableBytes > ProxyLimits.maxBody { tooLarge = true; body.clear() }
             if !tooLarge { body.writeBuffer(&chunk) }
         case .end:
             guard let h = head else { return }
             head = nil
+            if refused { return }
             if h.method == .CONNECT && target == nil {
                 let host = String(h.uri.split(separator: ":").dropLast().joined(separator: ":"))
-                if !engine.allows(client, userAgent: h.headers.first(name: "user-agent")) {
-                    refuse(context: context, head: h, ProxyLimits.refusal(ProxyLimits.notAllowed))
+                    .trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+                if !ProxyLimits.isValidHost(host) {
+                    refuse(context: context, head: h, ProxyLimits.refusal("invalid host name.", status: 400))
                     return
                 }
                 if !client.isLocal && ProxyLimits.isLoopback(host) {
@@ -126,8 +155,10 @@ final class ExchangeHandler: ChannelInboundHandler, RemovableChannelHandler {
         busy = true
         let (h, b) = queue.removeFirst()
         handle(context: context, head: h, body: b).whenComplete { [weak self] _ in
-            self?.busy = false
-            self?.processNext()
+            guard let self else { return }
+            self.busy = false
+            self.processNext()
+            if !self.busy { self.armIdle(seconds: ProxyLimits.keepAliveTimeout) }
         }
     }
 
@@ -268,6 +299,15 @@ final class TunnelSniffer: ChannelInboundHandler, RemovableChannelHandler {
     private let client: ClientInfo
     private var decided = false
     private var buffered: [ByteBuffer] = []
+    private var firstByteTimeout: Scheduled<Void>?
+
+    func handlerAdded(context: ChannelHandlerContext) {
+        firstByteTimeout = context.eventLoop.scheduleTask(in: .seconds(ProxyLimits.headerTimeout)) { [weak self] in
+            if self?.decided == false { context.close(promise: nil) }
+        }
+    }
+
+    func handlerRemoved(context: ChannelHandlerContext) { firstByteTimeout?.cancel() }
 
     init(engine: ProxyEngine, host: String, port: Int, client: ClientInfo) {
         self.engine = engine; self.host = host; self.port = port; self.client = client

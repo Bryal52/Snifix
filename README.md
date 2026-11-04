@@ -107,6 +107,10 @@ dotnet run --project windows/Snifix.Windows -- --selftest
 
 На Mac — `~/Library/Application Support/Snifix`, на Windows — `%APPDATA%\Snifix`: правила (`rules.json`), настройки, сертификат и кэш иконок. Ключ сертификата не покидает ваш Mac.
 
+## Удаление
+
+Перед удалением приложения уберите сертификат: на Mac — меню **Certificate → Remove Certificate and Keys…**, на Windows — **Devices → This PC → Replace Certificate…** или удалите «Snifix CA» в «Управлении сертификатами пользователя». Затем удалите приложение и папку с данными. На iPhone и Android удалите профиль или сертификат Snifix CA в настройках.
+
 ## Поддержать автора
 
 Кнопка **Donate** с чашкой кофе в правом нижнем углу окна показывает реквизиты. Донат не обязателен — Snifix бесплатный и останется бесплатным.

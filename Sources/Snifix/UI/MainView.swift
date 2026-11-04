@@ -838,7 +838,8 @@ struct FlowContextMenu: View {
         panel.nameFieldStringValue = "Snifix.har"
         panel.allowedContentTypes = [UTType(filenameExtension: "har") ?? .json]
         if panel.runModal() == .OK, let url = panel.url {
-            try? Export.har(flows).write(to: url)
+            guard let redact = HARPrompt.askRedact() else { return }
+            SecureFile.write(Export.har(flows, redactSecrets: redact), to: url)
             model.showToast("Saved \(flows.count) requests")
         }
     }

@@ -89,6 +89,10 @@ public sealed class ProxyEngine : IDisposable
         server.IgnoreServerCertificateErrors = !Settings.VerifyServerCertificates;
         server.EnableDecryptFailureBypass = Settings.AutoBypassPinned;
         server.MaxBufferedBodyBytes = 256 * 1024 * 1024;
+        // No TLS older than 1.2 with apps or servers; clients that never send their request are dropped
+        server.SupportedSslProtocols = System.Security.Authentication.SslProtocols.Tls12 | System.Security.Authentication.SslProtocols.Tls13;
+        server.SupportedServerSslProtocols = System.Security.Authentication.SslProtocols.Tls12 | System.Security.Authentication.SslProtocols.Tls13;
+        server.ClientHeaderTimeoutSeconds = 15;
         endPoint = new ExplicitProxyEndPoint(IPAddress.Any, Settings.Port, Settings.DecryptHttps);
         endPoint.BeforeTunnelConnectRequest += OnTunnel;
         server.AddEndPoint(endPoint);
@@ -814,7 +818,9 @@ public static class Clients
 
 static class CertificatePage
 {
-    public static string Html(string host, int port, string caName) => $$"""
+    public static string Html(string host, int port, string rawName) => Page(host, port, System.Net.WebUtility.HtmlEncode(rawName));
+
+    static string Page(string host, int port, string caName) => $$"""
         <!doctype html><html lang="en"><head><meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1"><title>Snifix — certificate</title>
         <style>

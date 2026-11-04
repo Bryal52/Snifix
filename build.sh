@@ -43,7 +43,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </dict></plist>
 PLIST
 
-codesign --force --deep --sign - "$APP"
+# Hardened runtime: no code injection (DYLD_INSERT_LIBRARIES, debuggers) into the app that holds the CA key
+codesign --force --options runtime --sign - "$APP"
 
 # Quit a running copy first: it puts the Mac's proxy settings back on exit
 if pgrep -x Snifix >/dev/null; then

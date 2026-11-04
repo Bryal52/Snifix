@@ -40,7 +40,14 @@ public enum Export {
     }
 
     /// HTTP Archive 1.2, readable by browsers' devtools, Charles, Proxyman and others.
-    public static func har(_ flows: [FlowData]) -> Data {
+    static let secretHeaders: Set<String> = ["authorization", "proxy-authorization", "cookie", "set-cookie", "x-api-key", "x-auth-token"]
+
+    static func redact(_ headers: [HTTPHeader], _ on: Bool) -> [[String: String]] {
+        headers.map { ["name": $0.name, "value": on && secretHeaders.contains($0.name.lowercased()) ? "[removed by Snifix]" : $0.value] }
+    }
+
+    /// With `redactSecrets` the Authorization, Cookie and similar headers are blanked out.
+    public static func har(_ flows: [FlowData], redactSecrets: Bool = false) -> Data {
         let iso = ISO8601DateFormatter()
         iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         let entries: [[String: Any]] = flows.filter { $0.request.method != "CONNECT" }.map { f in
@@ -50,7 +57,7 @@ public enum Export {
                 "time": (f.duration ?? 0) * 1000,
                 "request": [
                     "method": r.method, "url": r.url, "httpVersion": "HTTP/1.1",
-                    "headers": r.headers.map { ["name": $0.name, "value": $0.value] },
+                    "headers": redact(r.headers, redactSecrets),
                     "queryString": r.queryItems.map { ["name": $0.name, "value": $0.value] },
                     "cookies": [], "headersSize": -1, "bodySize": r.body.count,
                     "postData": ["mimeType": r.headers["Content-Type"] ?? "", "text": String(decoding: r.body, as: UTF8.self)],
@@ -65,7 +72,7 @@ public enum Export {
                 if let text { content["text"] = text } else { content["text"] = body.base64EncodedString(); content["encoding"] = "base64" }
                 entry["response"] = [
                     "status": res.statusCode, "statusText": res.reason, "httpVersion": res.version,
-                    "headers": res.headers.map { ["name": $0.name, "value": $0.value] },
+                    "headers": redact(res.headers, redactSecrets),
                     "cookies": [], "content": content, "redirectURL": res.headers["Location"] ?? "",
                     "headersSize": -1, "bodySize": res.body.count,
                 ] as [String: Any]
@@ -99,6 +106,7 @@ extension ProxyEngine {
     }
 }
 
+#if DEBUG
 extension ProxyEngine {
     /// Used by snifix-selftest: one request as this computer or as another device; nil when it went through.
     public func sendForTest(_ request: RequestData, remoteClient: Bool) async -> String? {
@@ -115,3 +123,4 @@ extension ProxyEngine {
         }
     }
 }
+#endif

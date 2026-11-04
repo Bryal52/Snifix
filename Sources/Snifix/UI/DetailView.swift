@@ -191,10 +191,23 @@ struct BodyView: View {
     let headers: [HTTPHeader]
     var fileName: String
     @UIState private var pretty = true
+    @UIState private var decoded: Data?
     @Environment(AppModel.self) private var model
 
+    /// Decompressing a big body happens off the main thread, so the window never freezes.
     var body: some View {
-        let decoded = BodyCodec.decoded(data, headers: headers)
+        Group {
+            if let decoded { content(decoded) }
+            else { ProgressView().controlSize(.small).frame(maxWidth: .infinity, maxHeight: .infinity) }
+        }
+        .task(id: "\(fileName)|\(data.count)|\(headers["Content-Encoding"] ?? "")") {
+            let raw = data, h = headers
+            decoded = await Task.detached(priority: .userInitiated) { BodyCodec.decoded(raw, headers: h) }.value
+        }
+    }
+
+    @ViewBuilder
+    private func content(_ decoded: Data) -> some View {
         let type = headers["Content-Type"]?.lowercased() ?? ""
         if decoded.isEmpty {
             EmptyState(symbol: "doc", title: "Empty body", subtitle: "")
@@ -238,7 +251,7 @@ struct BodyView: View {
         let panel = NSSavePanel()
         let ext = (headers["Content-Type"] ?? "").contains("json") ? "json" : "bin"
         panel.nameFieldStringValue = "\(fileName).\(ext)"
-        if panel.runModal() == .OK, let url = panel.url { try? data.write(to: url) }
+        if panel.runModal() == .OK, let url = panel.url { SecureFile.write(data, to: url) }
     }
 
     private func hexDump(_ data: Data) -> String {

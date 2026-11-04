@@ -45,8 +45,11 @@ enum LocalEndpoints {
         ResponseData(statusCode: 400, headers: [HTTPHeader("Content-Type", "text/plain")], body: Data("Bad request\n".utf8))
     }
 
-    private static func page(proxyHost: String, port: Int, caName: String) -> String {
-        """
+    private static func page(proxyHost: String, port: Int, caName rawName: String) -> String {
+        // The name comes from the computer name: escaped like any text put into HTML
+        let caName = rawName.replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;").replacingOccurrences(of: "\"", with: "&quot;")
+        return """
         <!doctype html><html lang="en"><head><meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <title>Snifix — certificate</title>

@@ -234,7 +234,20 @@ final class FlowBuffer: FlowSink, @unchecked Sendable {
 @MainActor
 @Observable
 final class AppModel {
-    static let shared = AppModel()
+    // The watchdog copy of Snifix must not start a proxy, so it is checked before anything else
+    static let shared: AppModel = {
+        Watchdog.runIfRequested()
+        return AppModel()
+    }()
+
+    /// SNIFIX_HOME points a test copy at its own folder (debug builds only).
+    static var testHome: String? {
+        #if DEBUG
+        return ProcessInfo.processInfo.environment["SNIFIX_HOME"]
+        #else
+        return nil
+        #endif
+    }
 
     let supportDirectory: URL
     let ca: CertificateAuthority
@@ -297,11 +310,10 @@ final class AppModel {
 
     private init() {
         let fm = FileManager.default
-        // SNIFIX_HOME points a test copy at its own folder
-        supportDirectory = ProcessInfo.processInfo.environment["SNIFIX_HOME"].map { URL(fileURLWithPath: $0) }
+        supportDirectory = Self.testHome.map { URL(fileURLWithPath: $0) }
             ?? fm.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Snifix")
         try? fm.createDirectory(at: supportDirectory, withIntermediateDirectories: true)
-        let testCopy = ProcessInfo.processInfo.environment["SNIFIX_HOME"] != nil
+        let testCopy = Self.testHome != nil
         ca = Self.loadCertificateAuthority(directory: supportDirectory, testCopy: testCopy)
         let loadedSettings = Self.load(ProxySettings.self, "settings.json", in: supportDirectory) ?? ProxySettings()
         let loadedRules = Self.load(RulesDocument.self, "rules.json", in: supportDirectory) ?? RulesDocument()
@@ -319,6 +331,8 @@ final class AppModel {
         engine.onAccessRequest = { [weak self] address, device in
             Task { @MainActor in
                 guard let self else { return }
+                // At most a few banners: a device with many addresses must not flood the window
+                guard self.accessRequests.count < 5 else { return }
                 withAnimation(.spring(response: 0.45, dampingFraction: 0.8)) { self.accessRequests[address] = device ?? "Device" }
                 NSApp.requestUserAttention(.informationalRequest)
             }
@@ -408,7 +422,10 @@ final class AppModel {
     }
 
     /// Switches the Mac's proxy in the background; the button shows the new state right away.
+    private var watchdog: Process?
+
     func setSystemProxy(_ on: Bool) {
+        if on { startWatchdog() }
         let proxy = systemProxy
         let port = settings.port
         withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
@@ -615,7 +632,7 @@ final class AppModel {
             }
             data = sealed
         }
-        try? data.write(to: url)
+        SecureFile.write(data, to: url)
         showToast(password?.isEmpty == false ? "Session saved with a password: \(list.count) requests" : "Session saved: \(list.count) requests",
                   symbol: password?.isEmpty == false ? "lock.fill" : "checkmark.circle.fill")
     }
@@ -789,6 +806,35 @@ final class AppModel {
         engine.forgetClient(address)
     }
 
+    /// A second copy of Snifix waits for this one to exit and puts the network settings back
+    /// if it died without doing it (crash, kill -9).
+    private func startWatchdog() {
+        guard watchdog?.isRunning != true, let exe = Bundle.main.executableURL else { return }
+        let p = Process()
+        p.executableURL = exe
+        p.arguments = ["--watchdog", String(getpid()), supportDirectory.path]
+        try? p.run()
+        watchdog = p
+    }
+
+    /// Takes Snifix out of the system: trust, keys and certificate files, then quits.
+    func removeCertificate() {
+        let alert = NSAlert()
+        alert.messageText = "Remove the Snifix certificate and keys?"
+        alert.informativeText = "This Mac stops trusting Snifix and the key is deleted, as before uninstalling the app. Remove the Snifix CA profile from your phones yourself. Snifix quits; the next start makes a new certificate."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Remove and Quit")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        if systemProxyEnabled { systemProxy.disable() }
+        CertificateTrust.remove(ca.certificateDER)
+        KeychainKeyProtector().delete()
+        for name in ["snifix-ca.pem", "snifix-ca-key.sealed", "snifix-ca-key.pem"] {
+            try? FileManager.default.removeItem(at: supportDirectory.appendingPathComponent(name))
+        }
+        NSApp.terminate(nil)
+    }
+
     /// A new CA and key, e.g. after the old key might have been copied (it used to be a plain file, backups keep it).
     func replaceCertificate() {
         let alert = NSAlert()
@@ -847,8 +893,9 @@ final class AppModel {
         }
     }
 
+    /// Copied text stays on this Mac: requests carry tokens, they must not travel to other devices with Universal Clipboard.
     func copy(_ text: String, note: String = "Copied") {
-        NSPasteboard.general.clearContents()
+        NSPasteboard.general.prepareForNewContents(with: .currentHostOnly)
         NSPasteboard.general.setString(text, forType: .string)
         showToast(note, symbol: "doc.on.doc.fill")
     }
@@ -889,5 +936,29 @@ final class Flag: @unchecked Sendable {
     var value: Bool {
         get { lock.withLock { stored } }
         set { lock.withLock { stored = newValue } }
+    }
+}
+
+/// Files with intercepted data (sessions, HAR, bodies) are readable by this user only.
+enum SecureFile {
+    static func write(_ data: Data, to url: URL) {
+        let fm = FileManager.default
+        try? fm.removeItem(at: url)
+        fm.createFile(atPath: url.path, contents: nil, attributes: [.posixPermissions: 0o600])
+        try? data.write(to: url)
+        try? fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+    }
+}
+
+/// `Snifix --watchdog <pid> <folder>`: waits until that Snifix exits, then restores the proxy settings
+/// it left behind (the backup file exists only while Snifix's proxy is switched on).
+enum Watchdog {
+    static func runIfRequested() {
+        let args = CommandLine.arguments
+        guard let i = args.firstIndex(of: "--watchdog"), args.count > i + 2, let pid = pid_t(args[i + 1]) else { return }
+        let folder = URL(fileURLWithPath: args[i + 2])
+        while kill(pid, 0) == 0 { Thread.sleep(forTimeInterval: 2) }
+        SystemProxy(directory: folder).recoverIfNeeded()
+        exit(0)
     }
 }
