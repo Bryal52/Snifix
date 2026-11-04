@@ -958,7 +958,7 @@ enum Watchdog {
         guard let i = args.firstIndex(of: "--watchdog"), args.count > i + 2, let pid = pid_t(args[i + 1]) else { return }
         let folder = URL(fileURLWithPath: args[i + 2])
         while kill(pid, 0) == 0 { Thread.sleep(forTimeInterval: 2) }
-        SystemProxy(directory: folder).recoverIfNeeded()
+        SystemProxy(directory: folder).recoverIfNeeded(ownedBy: pid)
         exit(0)
     }
 }

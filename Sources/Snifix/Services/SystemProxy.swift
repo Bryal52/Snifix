@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 /// Points the Mac's network services at Snifix and puts the previous settings back afterwards.
 /// The previous settings are kept on disk, so a crash is repaired on the next launch.
@@ -15,6 +16,11 @@ final class SystemProxy: @unchecked Sendable {
         var server: String
         var port: Int
     }
+    /// The settings to put back, and which Snifix process switched the proxy on.
+    private struct Backup: Codable {
+        var owner: Int32?
+        var services: [Saved]
+    }
 
     private let stateURL: URL
     private(set) var isEnabled = false
@@ -23,17 +29,40 @@ final class SystemProxy: @unchecked Sendable {
         stateURL = directory.appendingPathComponent("system-proxy-backup.json")
     }
 
-    /// Restores settings left over by a previous run that did not exit cleanly.
+    /// At launch: restores settings left by a run that did not exit cleanly,
+    /// but never those of another Snifix that is still running.
     func recoverIfNeeded() {
-        if FileManager.default.fileExists(atPath: stateURL.path) { disable() }
+        guard let backup = loadBackup() else { return }
+        if let owner = backup.owner, owner != getpid(), Self.isSnifix(owner) { return }
+        disable()
+    }
+
+    /// For the watchdog: restores only what the process it watched switched on. If a new copy of
+    /// Snifix has taken over in the meantime, the backup is that copy's and is left alone.
+    func recoverIfNeeded(ownedBy owner: pid_t) {
+        guard let backup = loadBackup(), backup.owner == owner else { return }
+        disable()
+    }
+
+    private func loadBackup() -> Backup? {
+        guard let data = try? Data(contentsOf: stateURL) else { return nil }
+        if let b = try? JSONDecoder().decode(Backup.self, from: data) { return b }
+        // Files written before the owner was recorded
+        if let old = try? JSONDecoder().decode([Saved].self, from: data) { return Backup(owner: nil, services: old) }
+        return nil
+    }
+
+    /// A live process whose executable is Snifix (the PID may have been reused by something else).
+    private static func isSnifix(_ pid: pid_t) -> Bool {
+        guard kill(pid, 0) == 0 || errno == EPERM else { return false }
+        var buf = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
+        guard proc_pidpath(pid, &buf, UInt32(buf.count)) > 0 else { return false }
+        return String(cString: buf).hasSuffix("/Snifix")
     }
 
     func enable(port: Int) {
         lock.lock(); defer { lock.unlock() }
-        var saved: [Saved] = []
-        if let data = try? Data(contentsOf: stateURL), let old = try? JSONDecoder().decode([Saved].self, from: data) {
-            saved = old
-        }
+        var saved = loadBackup()?.services ?? []
         for service in Self.services() {
             if !saved.contains(where: { $0.service == service }) {
                 let web = Self.read(["-getwebproxy", service])
@@ -45,7 +74,8 @@ final class SystemProxy: @unchecked Sendable {
                                    secure: mine(secure) ? Entry(enabled: false, server: "", port: 0) : secure))
             }
         }
-        if let data = try? JSONEncoder().encode(saved) { try? data.write(to: stateURL) }
+        // The current process becomes the owner: only its watchdog may undo these settings
+        if let data = try? JSONEncoder().encode(Backup(owner: getpid(), services: saved)) { try? data.write(to: stateURL) }
         for service in Self.services() {
             Self.run(["-setwebproxy", service, "127.0.0.1", "\(port)"])
             Self.run(["-setsecurewebproxy", service, "127.0.0.1", "\(port)"])
@@ -55,7 +85,7 @@ final class SystemProxy: @unchecked Sendable {
 
     func disable() {
         lock.lock(); defer { lock.unlock() }
-        let saved = (try? Data(contentsOf: stateURL)).flatMap { try? JSONDecoder().decode([Saved].self, from: $0) } ?? []
+        let saved = loadBackup()?.services ?? []
         for service in Self.services() {
             if let s = saved.first(where: { $0.service == service }) {
                 restore(service, s.web, set: "-setwebproxy", state: "-setwebproxystate")
