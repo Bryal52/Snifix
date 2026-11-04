@@ -119,6 +119,8 @@ final class FrameRelay: ChannelInboundHandler, RemovableChannelHandler {
     /// Payload bytes kept for display in this direction; later messages keep only their metadata.
     private var kept = 0
     private static let keepLimit = 32 * 1024 * 1024
+    /// Bytes of the shared body budget held by unparsed bytes and kept payloads; returned when the connection ends.
+    private var reserved = 0
     private static let counter = NSLock()
     private static var nextMessageID = 1
 
@@ -129,21 +131,45 @@ final class FrameRelay: ChannelInboundHandler, RemovableChannelHandler {
     func channelRead(context: ChannelHandlerContext, data: NIOAny) {
         var buffer = unwrapInboundIn(data)
         peer.writeAndFlush(buffer, promise: nil)
+        Backpressure.pauseIfNeeded(reading: context.channel, writingTo: peer)
         guard recorder != nil, !tooBig else { return }
+        // A frame this large, or one that does not fit the shared budget, is relayed but no longer parsed for display
+        guard pending.readableBytes + buffer.readableBytes <= 32 * 1024 * 1024, ProxyLimits.reserve(buffer.readableBytes) else {
+            tooBig = true
+            ProxyLimits.release(pending.readableBytes)
+            reserved -= pending.readableBytes
+            pending.clear()
+            return
+        }
+        reserved += buffer.readableBytes
         pending.writeBuffer(&buffer)
-        // A frame this large is relayed but no longer parsed for display
-        if pending.readableBytes > 32 * 1024 * 1024 { tooBig = true; pending.clear(); return }
+        let before = pending.readableBytes
         while var message = parseFrame() {
-            if kept + message.payload.count > FrameRelay.keepLimit {
+            if kept + message.payload.count > FrameRelay.keepLimit || !ProxyLimits.reserve(message.payload.count) {
                 message.droppedSize = message.payload.count
                 message.payload = Data()
             } else {
                 kept += message.payload.count
+                reserved += message.payload.count
             }
             recorder?.update {
                 if $0.webSocketMessages.count < 10000 { $0.webSocketMessages.append(message) }
             }
         }
+        // Parsed bytes left the buffer (a kept payload was counted on its own above)
+        let parsed = before - pending.readableBytes
+        ProxyLimits.release(parsed)
+        reserved -= parsed
+    }
+
+    func channelWritabilityChanged(context: ChannelHandlerContext) {
+        Backpressure.resumeIfWritable(context.channel, reading: peer)
+        context.fireChannelWritabilityChanged()
+    }
+
+    func handlerRemoved(context: ChannelHandlerContext) {
+        ProxyLimits.release(reserved)
+        reserved = 0
     }
 
     private func parseFrame() -> WebSocketMessage? {

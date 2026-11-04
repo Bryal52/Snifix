@@ -51,11 +51,18 @@ final class ExchangeHandler: ChannelInboundHandler, RemovableChannelHandler {
     private let client: ClientInfo
     private var head: HTTPRequestHead?
     private var body = ByteBuffer()
-    private var queue: [(HTTPRequestHead, ByteBuffer)] = []
+    /// Requests waiting their turn, with the bytes each one holds of the shared body budget.
+    private var queue: [(HTTPRequestHead, ByteBuffer, Int)] = []
     private var busy = false
     private var context: ChannelHandlerContext?
     private var pool: UpstreamPool?
     private var tooLarge = false
+    /// All connections together already hold the body budget; this request is answered with 503.
+    private var overBudget = false
+    /// Budget bytes of the body being received, and of everything this handler holds (queued, processing, being sent).
+    private var receiving = 0
+    private var held = 0
+    private var finished = false
     /// The client was refused at the request head; the rest of that request is dropped unread.
     private var refused = false
     private var idleTask: Scheduled<Void>?
@@ -79,6 +86,27 @@ final class ExchangeHandler: ChannelInboundHandler, RemovableChannelHandler {
     func handlerRemoved(context: ChannelHandlerContext) {
         idleTask?.cancel()
         self.context = nil
+        finished = true
+        ProxyLimits.release(held)
+        held = 0; receiving = 0
+    }
+
+    private func take(_ n: Int) -> Bool {
+        guard ProxyLimits.reserve(n) else { return false }
+        held += n
+        return true
+    }
+
+    private func giveBack(_ n: Int) {
+        guard !finished else { return }
+        ProxyLimits.release(n)
+        held -= n
+    }
+
+    private func dropBody() {
+        body.clear()
+        giveBack(receiving)
+        receiving = 0
     }
 
     /// Closes the connection if no request arrives in time; HTTP/2 streams are managed by their connection.
@@ -105,8 +133,9 @@ final class ExchangeHandler: ChannelInboundHandler, RemovableChannelHandler {
         case .head(let h):
             idleTask?.cancel()
             head = h
-            body.clear()
+            dropBody()
             tooLarge = false
+            overBudget = false
             refused = false
             // Checked before any body is read, so a device that is not allowed cannot fill the memory
             if target == nil && !engine.allows(client, userAgent: h.headers.first(name: "user-agent")) {
@@ -118,10 +147,13 @@ final class ExchangeHandler: ChannelInboundHandler, RemovableChannelHandler {
                 context.writeAndFlush(wrapOutboundOut(.head(HTTPResponseHead(version: h.version, status: .continue))), promise: nil)
             }
         case .body(var chunk):
-            if refused { return }
+            if refused || tooLarge || overBudget { return }
             // Past the limit the rest is dropped and the request is answered with 413
-            if body.readableBytes + chunk.readableBytes > ProxyLimits.maxBody { tooLarge = true; body.clear() }
-            if !tooLarge { body.writeBuffer(&chunk) }
+            if body.readableBytes + chunk.readableBytes > ProxyLimits.maxBody { tooLarge = true; dropBody(); return }
+            // Past the budget of all connections together: dropped too, answered with 503
+            guard take(chunk.readableBytes) else { overBudget = true; dropBody(); return }
+            receiving += chunk.readableBytes
+            body.writeBuffer(&chunk)
         case .end:
             guard let h = head else { return }
             head = nil
@@ -144,8 +176,13 @@ final class ExchangeHandler: ChannelInboundHandler, RemovableChannelHandler {
                 refuse(context: context, head: h, ProxyLimits.refusal("the request body is larger than 256 MB.", status: 413))
                 return
             }
-            queue.append((h, body))
+            if overBudget {
+                refuse(context: context, head: h, ProxyLimits.refusal(ProxyLimits.busy, status: 503))
+                return
+            }
+            queue.append((h, body, receiving))
             body = ByteBuffer()
+            receiving = 0
             processNext()
         }
     }
@@ -153,9 +190,10 @@ final class ExchangeHandler: ChannelInboundHandler, RemovableChannelHandler {
     private func processNext() {
         guard !busy, !queue.isEmpty, let context else { return }
         busy = true
-        let (h, b) = queue.removeFirst()
+        let (h, b, size) = queue.removeFirst()
         handle(context: context, head: h, body: b).whenComplete { [weak self] _ in
             guard let self else { return }
+            self.giveBack(size)
             self.busy = false
             self.processNext()
             if !self.busy { self.armIdle(seconds: ProxyLimits.keepAliveTimeout) }
@@ -280,7 +318,12 @@ final class ExchangeHandler: ChannelInboundHandler, RemovableChannelHandler {
         if http2, let t = response.trailers, !t.isEmpty {
             trailers = HTTPHeaders(t.map { ($0.name, $0.value) })
         }
+        // The body counts against the shared budget until it has left (a client that reads slowly keeps holding it)
+        let size = noBody || finished ? 0 : response.body.count
+        ProxyLimits.hold(size)
+        held += size
         let done = context.writeAndFlush(wrapOutboundOut(.end(trailers)))
+        done.whenComplete { [weak self] _ in self?.giveBack(size) }
         if !keepAlive { done.whenComplete { _ in context.close(promise: nil) } }
         return done
     }
@@ -402,7 +445,15 @@ final class RelayHandler: ChannelInboundHandler, RemovableChannelHandler {
         peer.writeAndFlush(buffer, promise: nil)
     }
 
-    func channelRead(context: ChannelHandlerContext, data: NIOAny) { forward(unwrapInboundIn(data)) }
+    func channelRead(context: ChannelHandlerContext, data: NIOAny) {
+        forward(unwrapInboundIn(data))
+        Backpressure.pauseIfNeeded(reading: context.channel, writingTo: peer)
+    }
+
+    func channelWritabilityChanged(context: ChannelHandlerContext) {
+        Backpressure.resumeIfWritable(context.channel, reading: peer)
+        context.fireChannelWritabilityChanged()
+    }
 
     func channelInactive(context: ChannelHandlerContext) {
         onClose?()
@@ -411,6 +462,19 @@ final class RelayHandler: ChannelInboundHandler, RemovableChannelHandler {
     }
 
     func errorCaught(context: ChannelHandlerContext, error: Error) { context.close(promise: nil) }
+}
+
+/// A fast sender and a slow receiver must not pile data up in Snifix: reading stops while the other side
+/// cannot take more, and resumes once it drains.
+enum Backpressure {
+    static func pauseIfNeeded(reading channel: Channel, writingTo peer: Channel) {
+        if !peer.isWritable { channel.setOption(ChannelOptions.autoRead, value: false).whenFailure { _ in } }
+    }
+
+    /// Called when `channel` (the peer of the reading side) became writable again.
+    static func resumeIfWritable(_ channel: Channel, reading peer: Channel) {
+        if channel.isWritable { peer.setOption(ChannelOptions.autoRead, value: true).whenFailure { _ in } }
+    }
 }
 
 /// Reports clients that refuse the Snifix certificate (not installed, or certificate pinning).

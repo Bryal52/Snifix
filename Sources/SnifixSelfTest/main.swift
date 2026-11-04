@@ -1,6 +1,8 @@
 import Foundation
 import SnifixCore
 
+ScriptWorker.runIfRequested()
+
 func resolve(_ host: String) -> String {
     var info: UnsafeMutablePointer<addrinfo>?
     var hints = addrinfo(); hints.ai_family = AF_INET
@@ -211,6 +213,28 @@ let started = Date()
 (out, code) = curl(["https://httpbin.org/uuid"])
 check("Endless script is stopped", code == 0 && out.contains("200") && Date().timeIntervalSince(started) < 15, "\(Date().timeIntervalSince(started))s \(out.prefix(80))")
 engine.rules.rules.removeAll { $0.name == "Loop" }
+(out, code) = curl(["https://example.com/mock/script"])
+check("Scripts work again after an endless one was stopped", out.contains("\"patched\":42"), out)
+var logLine = Rule(name: "Log", kind: .script, matcher: RuleMatcher(pattern: "https://example.com/logtest"))
+logLine.script = "function onRequest(c,u,r){ console.log('seen ' + r.method); return r; }"
+engine.rules.rules.insert(logLine, at: 0)
+final class Lines: @unchecked Sendable { let lock = NSLock(); var all: [String] = [] }
+let logs = Lines()
+await engine.scripts.setLogHandler { line in logs.lock.withLock { logs.all.append(line) } }
+(out, code) = curl(["https://example.com/logtest"])
+Thread.sleep(forTimeInterval: 0.3)
+check("Script console.log reaches Snifix", logs.lock.withLock { logs.all }.contains("[Log] seen GET"), "\(logs.lock.withLock { logs.all })")
+engine.rules.rules.removeAll { $0.name == "Log" }
+
+// Parallel uploads share one body budget: past it a request is answered with 503
+ProxyLimitsForTest.setBufferLimit(1024 * 1024)
+let upload = dir.appendingPathComponent("upload.bin")
+try Data(repeating: 7, count: 2 * 1024 * 1024).write(to: upload)
+(out, code) = curl(["--data-binary", "@\(upload.path)", "https://example.com/mock/profile"])
+check("Body budget of all connections refuses with 503", out.contains("503") && out.contains("1 GB"), String(out.prefix(300)))
+ProxyLimitsForTest.setBufferLimit(1024 * 1024 * 1024)
+(out, code) = curl(["--data-binary", "@\(upload.path)", "https://example.com/mock/profile"])
+check("Same upload passes under the normal budget", out.contains(#""name":"Snifix""#), String(out.prefix(300)))
 
 // Encryption
 let sealedSession = try PasswordSeal.seal(Data("tokens".utf8), password: "qwerty")
@@ -274,6 +298,14 @@ var tokenFlow = harFlows.first!
 tokenFlow.request.headers.append(HTTPHeader("Authorization", "Bearer secret-token"))
 let har = String(decoding: Export.har([tokenFlow], redactSecrets: true), as: UTF8.self)
 check("HAR export removes tokens", !har.contains("secret-token") && har.contains("[removed by Snifix]"))
+var queryFlow = tokenFlow
+queryFlow.request.setURL("https://api.example.com/login?page=2&access_token=url-secret-1&sig=url-secret-2#top")
+queryFlow.request.headers = [HTTPHeader("Content-Type", "application/x-www-form-urlencoded")]
+queryFlow.request.body = Data("user=alice&password=form-secret-3".utf8)
+let harQuery = String(decoding: Export.har([queryFlow], redactSecrets: true), as: UTF8.self)
+check("HAR export removes tokens from the URL and form bodies",
+      !harQuery.contains("url-secret") && !harQuery.contains("form-secret") && harQuery.contains("page=2") && harQuery.contains("user=alice"),
+      String(harQuery.prefix(600)))
 
 // A gzip "bomb": 300 MB of zeros compressed to a few hundred KB is not unpacked past the limit
 let bombPath = dir.appendingPathComponent("bomb.gz").path
@@ -308,6 +340,8 @@ for f in flows {
 check("Клиент определён как curl", flows.contains { $0.client.appName == "curl" })
 let decoded = flows.first { $0.request.host == "www.google.com" }.flatMap { f in f.response.map { BodyCodec.decoded($0.body, headers: $0.headers) } }
 check("Тело распаковано", decoded.map { String(decoding: $0, as: UTF8.self).lowercased().contains("<html") } ?? false)
+Thread.sleep(forTimeInterval: 1)
+check("Body budget returns to zero after all requests", ProxyLimitsForTest.bufferedBytes == 0, "\(ProxyLimitsForTest.bufferedBytes) bytes held")
 engine.stop()
 try? FileManager.default.removeItem(at: dir)
 print(failures == 0 ? "Всё прошло" : "Ошибок: \(failures)")

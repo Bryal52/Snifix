@@ -254,6 +254,8 @@ final class ResponseCollector: ChannelInboundHandler, RemovableChannelHandler {
     private var promise: EventLoopPromise<ResponseData>?
     private var head: HTTPResponseHead?
     private var body = ByteBuffer()
+    /// Bytes of the shared body budget held by the response being received.
+    private var reserved = 0
     private var receivedAny = false
     private var reused = false
     /// For WebSocket upgrades: called with the 101 response head instead of collecting.
@@ -262,11 +264,20 @@ final class ResponseCollector: ChannelInboundHandler, RemovableChannelHandler {
     func begin(_ p: EventLoopPromise<ResponseData>) {
         promise = p
         head = nil
-        body.clear()
+        clearBody()
         receivedAny = false
     }
 
+    private func clearBody() {
+        body.clear()
+        ProxyLimits.release(reserved)
+        reserved = 0
+    }
+
+    func handlerRemoved(context: ChannelHandlerContext) { clearBody() }
+
     func fail(_ error: Error) {
+        clearBody()
         promise?.fail(error)
         promise = nil
     }
@@ -287,6 +298,12 @@ final class ResponseCollector: ChannelInboundHandler, RemovableChannelHandler {
                 context.close(promise: nil)
                 return
             }
+            guard ProxyLimits.reserve(b.readableBytes) else {
+                fail(UpstreamError.busy)
+                context.close(promise: nil)
+                return
+            }
+            reserved += b.readableBytes
             body.writeBuffer(&b)
         case .end(let trailers):
             guard let h = head, let p = promise else { return }
@@ -297,7 +314,7 @@ final class ResponseCollector: ChannelInboundHandler, RemovableChannelHandler {
             r.trailers = trailers.map { $0.map { HTTPHeader($0.name, $0.value) } }
             promise = nil
             head = nil
-            body.clear()
+            clearBody()
             reused = true
             p.succeed(r)
         }

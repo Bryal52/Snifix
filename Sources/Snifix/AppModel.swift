@@ -237,6 +237,7 @@ final class AppModel {
     // The watchdog copy of Snifix must not start a proxy, so it is checked before anything else
     static let shared: AppModel = {
         Watchdog.runIfRequested()
+        ScriptWorker.runIfRequested()
         return AppModel()
     }()
 
@@ -302,6 +303,8 @@ final class AppModel {
     var untrustedDevices: [String: String] = [:]
     /// Devices on the network that tried to use the proxy and wait for an answer: address → "iPhone" / "Android" / nil.
     var accessRequests: [String: String] = [:]
+    /// Devices that asked while five banners were already shown; each one gets a banner when a place frees up.
+    private(set) var waitingAccess: [(address: String, name: String)] = []
     var deviceProfiles: [String: DeviceProfile] = [:] {
         didSet { save(deviceProfiles, "devices.json"); rebuildSummaries() }
     }
@@ -336,9 +339,17 @@ final class AppModel {
         engine.onAccessRequest = { [weak self] address, device in
             Task { @MainActor in
                 guard let self else { return }
-                // At most a few banners: a device with many addresses must not flood the window
-                guard self.accessRequests.count < 5 else { return }
-                withAnimation(.spring(response: 0.45, dampingFraction: 0.8)) { self.accessRequests[address] = device ?? "Device" }
+                // At most a few banners: a device with many addresses must not flood the window.
+                // The rest wait in line and are counted in a separate bar, so no request goes unseen.
+                guard self.accessRequests[address] == nil, !self.waitingAccess.contains(where: { $0.address == address }) else { return }
+                if self.accessRequests.count < 5 {
+                    withAnimation(.spring(response: 0.45, dampingFraction: 0.8)) { self.accessRequests[address] = device ?? "Device" }
+                } else if self.waitingAccess.count < 200 {
+                    self.waitingAccess.append((address, device ?? "Device"))
+                } else {
+                    // The line is full: the device is asked about again on a later request
+                    self.engine.forgetClient(address)
+                }
                 NSApp.requestUserAttention(.informationalRequest)
             }
         }
@@ -853,13 +864,29 @@ final class AppModel {
         settings = s
         engine.forgetClient(address)
         withAnimation(.spring(response: 0.45, dampingFraction: 0.8)) { _ = accessRequests.removeValue(forKey: address) }
+        promoteWaitingAccess()
         showToast("\(address) may use Snifix — open the app on the device again", symbol: "checkmark.shield.fill")
     }
 
     func denyDevice(_ address: String) {
         engine.denyClient(address)
         withAnimation(.spring(response: 0.45, dampingFraction: 0.8)) { _ = accessRequests.removeValue(forKey: address) }
+        promoteWaitingAccess()
         showToast("\(address) is not allowed until Snifix restarts", symbol: "hand.raised.fill")
+    }
+
+    /// Refuses every device still waiting in line (the five banners stay to be answered one by one).
+    func denyWaitingDevices() {
+        let count = waitingAccess.count
+        for d in waitingAccess { engine.denyClient(d.address) }
+        withAnimation(.spring(response: 0.45, dampingFraction: 0.8)) { waitingAccess.removeAll() }
+        showToast("\(count) more devices are not allowed until Snifix restarts", symbol: "hand.raised.fill")
+    }
+
+    private func promoteWaitingAccess() {
+        guard accessRequests.count < 5, !waitingAccess.isEmpty else { return }
+        let next = waitingAccess.removeFirst()
+        withAnimation(.spring(response: 0.45, dampingFraction: 0.8)) { accessRequests[next.address] = next.name }
     }
 
     func removeApprovedDevice(_ address: String) {

@@ -46,7 +46,38 @@ public enum Export {
         headers.map { ["name": $0.name, "value": on && secretHeaders.contains($0.name.lowercased()) ? "[removed by Snifix]" : $0.value] }
     }
 
-    /// With `redactSecrets` the Authorization, Cookie and similar headers are blanked out.
+    /// Query and form parameters that usually carry tokens or passwords (access_token, api_key, sig, password…).
+    static func isSecretParameter(_ name: String) -> Bool {
+        let n = name.lowercased().replacingOccurrences(of: "-", with: "_")
+        if ["key", "sig", "code", "pwd", "pass", "jwt", "otp", "pin", "sid", "ticket", "state", "nonce"].contains(n) { return true }
+        return ["token", "secret", "password", "passwd", "auth", "session", "signature", "apikey", "api_key",
+                "credential", "private"].contains { n.contains($0) }
+    }
+
+    /// `a=1&token=xyz` → `a=1&token=[removed by Snifix]`, keeping names, order and the rest as they were.
+    static func redactParameters(_ text: String) -> String {
+        text.split(separator: "&", omittingEmptySubsequences: false).map { pair -> String in
+            let parts = pair.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
+            let name = String(parts[0]).removingPercentEncoding ?? String(parts[0])
+            guard parts.count == 2, isSecretParameter(name) else { return String(pair) }
+            return "\(parts[0])=%5Bremoved%20by%20Snifix%5D"
+        }.joined(separator: "&")
+    }
+
+    static func redactURL(_ url: String) -> String {
+        guard let q = url.firstIndex(of: "?") else { return url }
+        let end = url[q...].firstIndex(of: "#") ?? url.endIndex
+        return String(url[...q]) + redactParameters(String(url[url.index(after: q)..<end])) + url[end...]
+    }
+
+    /// With `redactSecrets` the Authorization, Cookie and similar headers are blanked out,
+    /// and so are token-like parameters in the URL and in form bodies.
+    static func postText(_ r: RequestData, _ redact: Bool) -> String {
+        let text = String(decoding: r.body, as: UTF8.self)
+        let form = (r.headers["Content-Type"] ?? "").lowercased().hasPrefix("application/x-www-form-urlencoded")
+        return redact && form ? redactParameters(text) : text
+    }
+
     public static func har(_ flows: [FlowData], redactSecrets: Bool = false) -> Data {
         let iso = ISO8601DateFormatter()
         iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -56,11 +87,13 @@ public enum Export {
                 "startedDateTime": iso.string(from: f.startedAt),
                 "time": (f.duration ?? 0) * 1000,
                 "request": [
-                    "method": r.method, "url": r.url, "httpVersion": "HTTP/1.1",
+                    "method": r.method, "url": redactSecrets ? redactURL(r.url) : r.url, "httpVersion": "HTTP/1.1",
                     "headers": redact(r.headers, redactSecrets),
-                    "queryString": r.queryItems.map { ["name": $0.name, "value": $0.value] },
+                    "queryString": r.queryItems.map {
+                        ["name": $0.name, "value": redactSecrets && isSecretParameter($0.name) ? "[removed by Snifix]" : $0.value]
+                    },
                     "cookies": [], "headersSize": -1, "bodySize": r.body.count,
-                    "postData": ["mimeType": r.headers["Content-Type"] ?? "", "text": String(decoding: r.body, as: UTF8.self)],
+                    "postData": ["mimeType": r.headers["Content-Type"] ?? "", "text": postText(r, redactSecrets)],
                 ] as [String: Any],
                 "cache": [:],
                 "timings": ["send": 0, "wait": (f.duration ?? 0) * 1000, "receive": 0],

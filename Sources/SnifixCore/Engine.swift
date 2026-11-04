@@ -458,12 +458,14 @@ enum UpstreamError: Error {
     case closed(beforeResponse: Bool)
     case timeout
     case tooLarge
+    case busy
     case blockedDestination
     var message: String {
         switch self {
         case .closed: return "The server closed the connection without a response"
         case .timeout: return "The server did not respond within 120 seconds"
         case .tooLarge: return "The response is larger than 256 MB — Snifix does not keep bodies this big"
+        case .busy: return ProxyLimits.busy
         case .blockedDestination: return "Other devices cannot reach this computer's localhost"
         }
     }
@@ -480,6 +482,28 @@ struct TrustState {
 enum ProxyLimits {
     /// Largest request or response body Snifix keeps in memory.
     static let maxBody = 256 * 1024 * 1024
+    /// Bodies held by all connections together while they are received, processed and sent (1 GB).
+    /// Past it new body data is refused, so many parallel uploads or downloads cannot use up the Mac's memory.
+    static let bufferLimit = NIOLockedValueBox(1024 * 1024 * 1024)
+    private static let buffered = NIOLockedValueBox(0)
+    static let busy = "Snifix is already holding 1 GB of bodies in transfer for all devices together. Try again in a moment."
+
+    /// Takes `n` bytes of the shared budget; false when it would pass the limit.
+    static func reserve(_ n: Int) -> Bool {
+        let limit = bufferLimit.withLockedValue { $0 }
+        return buffered.withLockedValue { b in
+            guard b + n <= limit else { return false }
+            b += n
+            return true
+        }
+    }
+
+    /// Counts bytes that are already in memory (a response being sent), without a limit check.
+    static func hold(_ n: Int) { buffered.withLockedValue { $0 += n } }
+
+    static func release(_ n: Int) { buffered.withLockedValue { $0 = max(0, $0 - n) } }
+
+    static var bufferedBytes: Int { buffered.withLockedValue { $0 } }
     /// Seconds a new connection has to send its first request; idle keep-alive connections close after the second value.
     static let headerTimeout: Int64 = 15
     static let keepAliveTimeout: Int64 = 120
@@ -526,5 +550,7 @@ extension ProxyEngine {
 public enum ProxyLimitsForTest {
     public static func isLoopback(_ host: String) -> Bool { ProxyLimits.isLoopback(host) }
     public static func isValidHost(_ host: String) -> Bool { ProxyLimits.isValidHost(host) }
+    public static var bufferedBytes: Int { ProxyLimits.bufferedBytes }
+    public static func setBufferLimit(_ n: Int) { ProxyLimits.bufferLimit.withLockedValue { $0 = n } }
 }
 #endif

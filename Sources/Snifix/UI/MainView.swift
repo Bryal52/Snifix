@@ -21,6 +21,10 @@ struct MainView: View {
                     AccessRequestBanner(address: address, name: name)
                         .transition(.move(edge: .top).combined(with: .opacity))
                 }
+                if !model.waitingAccess.isEmpty {
+                    WaitingAccessBanner(count: model.waitingAccess.count)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
                 ForEach(model.untrustedDevices.sorted(by: { $0.key < $1.key }), id: \.key) { address, name in
                     UntrustedBanner(address: address, name: name)
                         .transition(.move(edge: .top).combined(with: .opacity))
@@ -100,6 +104,33 @@ struct AccessRequestBanner: View {
         .padding(.horizontal, 14).padding(.vertical, 10)
         .background(Theme.gold.opacity(0.10))
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.gold.opacity(0.35)).frame(height: 1) }
+    }
+}
+
+/// More devices asked than there are banners; each one moves up when a banner above is answered.
+struct WaitingAccessBanner: View {
+    let count: Int
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            Image(systemName: "person.3.sequence.fill")
+                .font(.system(size: 17))
+                .foregroundStyle(Theme.goldGradient)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(count == 1 ? "1 more device is waiting to use Snifix" : "\(count) more devices are waiting to use Snifix")
+                    .font(.system(size: 12.5, weight: .semibold))
+                    .contentTransition(.numericText())
+                Text("Each one appears above when you answer a request. Their requests are refused until then.")
+                    .font(.system(size: 11.5)).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button("Deny All Waiting") { model.denyWaitingDevices() }
+        }
+        .padding(.horizontal, 14).padding(.vertical, 10)
+        .background(Theme.gold.opacity(0.06))
+        .overlay(alignment: .bottom) { Rectangle().fill(Theme.gold.opacity(0.35)).frame(height: 1) }
+        .animation(.spring(response: 0.4, dampingFraction: 0.8), value: count)
     }
 }
 
