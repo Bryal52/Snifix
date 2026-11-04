@@ -42,22 +42,27 @@ enum MapLocal {
         let rest = suffix(rule: rule, request: request)
         guard !rest.contains("..") else { return nil }
         let base = rest.isEmpty ? dir : dir.appendingPathComponent(rest)
-        // Symlinks and odd paths resolved, the result must still be inside the folder
+        // Every file Snifix would serve, also the ones it picks itself (42.json, index.json),
+        // must still be inside the folder once symlinks are resolved
         let root = dir.resolvingSymlinksInPath().standardizedFileURL.path
-        let resolved = base.resolvingSymlinksInPath().standardizedFileURL.path
-        guard resolved == root || resolved.hasPrefix(root + "/") else { return nil }
+        func inside(_ url: URL) -> Bool {
+            let p = url.resolvingSymlinksInPath().standardizedFileURL.path
+            return p == root || p.hasPrefix(root + "/")
+        }
+        guard inside(base) else { return nil }
         let fm = FileManager.default
         var isDir: ObjCBool = false
         if fm.fileExists(atPath: base.path, isDirectory: &isDir) {
             if !isDir.boolValue { return base }
-            for index in ["index.json", "index.html"] where fm.fileExists(atPath: base.appendingPathComponent(index).path) {
-                return base.appendingPathComponent(index)
+            for index in ["index.json", "index.html"] {
+                let candidate = base.appendingPathComponent(index)
+                if fm.fileExists(atPath: candidate.path) && inside(candidate) { return candidate }
             }
             return nil
         }
         for ext in ["json", "html", "txt", "xml"] {
             let candidate = base.appendingPathExtension(ext)
-            if fm.fileExists(atPath: candidate.path) { return candidate }
+            if fm.fileExists(atPath: candidate.path) && inside(candidate) { return candidate }
         }
         return nil
     }

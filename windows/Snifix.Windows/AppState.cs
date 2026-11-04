@@ -311,7 +311,11 @@ public sealed class AppState : INotifyPropertyChanged
 
     public void AllowDevice(string address)
     {
-        if (!Settings.ApprovedClients.Contains(address)) Settings.ApprovedClients.Add(address);
+        lock (Settings.ApprovedClients)
+        {
+            if (!Settings.ApprovedClients.Contains(address)) Settings.ApprovedClients.Add(address);
+            Settings.ApprovedAt[address] = DateTime.UtcNow;
+        }
         SaveSettings();
         Engine.ForgetClient(address);
         Remove(address);
@@ -327,9 +331,22 @@ public sealed class AppState : INotifyPropertyChanged
 
     public void RemoveApprovedDevice(string address)
     {
-        Settings.ApprovedClients.Remove(address);
+        lock (Settings.ApprovedClients)
+        {
+            Settings.ApprovedClients.Remove(address);
+            Settings.ApprovedAt.Remove(address);
+        }
         SaveSettings();
         Engine.ForgetClient(address);
+    }
+
+    /// New CA and key (the old one is removed from the trusted roots); Snifix starts again to create it.
+    public void ReplaceCertificate()
+    {
+        if (SystemProxy) SetSystemProxy(false);
+        Engine.ForgetCertificate();
+        try { System.Diagnostics.Process.Start(Environment.ProcessPath!); } catch { }
+        Environment.Exit(0);
     }
 
     void Remove(string address)

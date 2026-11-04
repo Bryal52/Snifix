@@ -98,3 +98,20 @@ extension ProxyEngine {
         return (recorder?.snapshot, response)
     }
 }
+
+extension ProxyEngine {
+    /// Used by snifix-selftest: one request as this computer or as another device; nil when it went through.
+    public func sendForTest(_ request: RequestData, remoteClient: Bool) async -> String? {
+        let eventLoop = loopGroup.next()
+        guard let pool = try? await eventLoop.submit({ UpstreamPool(eventLoop: eventLoop, engine: self, remoteClient: remoteClient) }).get() else {
+            return "no pool"
+        }
+        defer { eventLoop.execute { pool.closeAll() } }
+        do {
+            _ = try await eventLoop.flatSubmit { pool.send(request) }.get()
+            return nil
+        } catch {
+            return ProxyErrors.describe(error)
+        }
+    }
+}

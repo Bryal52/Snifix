@@ -53,6 +53,12 @@ public struct KeychainKeyProtector: KeyProtector {
         return key
     }
 
+    /// Removes the encryption key (when the CA is replaced, the next one gets a new key too).
+    public func delete() {
+        SecItemDelete([kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
+                       kSecAttrAccount as String: account] as CFDictionary)
+    }
+
     public func seal(_ plain: Data) throws -> Data {
         guard let combined = try AES.GCM.seal(plain, using: key()).combined else { throw KeychainError(status: errSecParam) }
         return combined
@@ -87,6 +93,8 @@ public enum PasswordSeal {
         guard rest.count > 20 else { throw KeychainError(status: errSecDecode) }
         let salt = Data(rest.prefix(16)); rest = rest.dropFirst(16)
         let iterations = rest.prefix(4).reduce(UInt32(0)) { $0 << 8 | UInt32($1) }; rest = rest.dropFirst(4)
+        // A damaged or crafted file must not crash (0) or hang (billions) Snifix
+        guard (10_000...5_000_000).contains(iterations) else { throw KeychainError(status: errSecDecode) }
         return try AES.GCM.open(AES.GCM.SealedBox(combined: Data(rest)), using: derive(password, salt: salt, iterations: iterations))
     }
 

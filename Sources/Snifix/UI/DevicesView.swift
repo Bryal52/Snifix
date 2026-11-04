@@ -109,6 +109,13 @@ struct MacCard: View {
                     }
                 }
             }
+            HStack {
+                Text("Fingerprint (SHA-256): \(model.ca.fingerprint)")
+                    .font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary).textSelection(.enabled)
+                Spacer()
+                Button("Replace Certificate…") { model.replaceCertificate() }
+                    .help("Makes a new Snifix certificate and key. Every device has to install and trust it again.")
+            }
             Divider()
             NetworkAccessSection()
             Divider()
@@ -193,6 +200,8 @@ struct IPhoneCard: View {
                     StepRow(number: 1, text: "iPhone and Mac are on the same Wi-Fi network.")
                     StepRow(number: 2, text: "Wi-Fi → (i) → **Configure Proxy → Automatic**, URL:")
                     CopyField(text: model.pacURL)
+                    Text("On public or office Wi-Fi choose Manual instead — server \(model.localAddress), port \(String(model.settings.port)): the automatic setting comes over plain Wi-Fi and could be faked there.")
+                        .font(.system(size: 10.5)).foregroundStyle(Theme.amber.opacity(0.9)).fixedSize(horizontal: false, vertical: true)
                     Text("Keeps working when the Mac's IP changes. If it does not connect, use the IP address: \(model.pacURLByIP)")
                         .font(.system(size: 10.5)).foregroundStyle(.secondary).textSelection(.enabled)
                     StepRow(number: 3, text: "Scan the QR code and download the certificate (or open **http://snifix.cert** in Safari).")

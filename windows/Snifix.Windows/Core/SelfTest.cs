@@ -73,9 +73,21 @@ public static class SelfTest
         Check("Map Local folder refuses full paths", !text.Contains("secret") || text.Contains("not found"), text);
         (st, text, _) = await Get("GET", "https://example.com/api/C:%5CWindows%5Cwin.ini");
         Check("Map Local folder refuses drive paths", st == 404, $"{st}");
-        rules.Rules.Remove(folder);
+        try
+        {
+            File.CreateSymbolicLink(Path.Combine(mocks, "users", "7.json"), Path.Combine(dir, "secret.txt"));
+            Directory.CreateSymbolicLink(Path.Combine(mocks, "outside"), dir);
+            (st, text, _) = await Get("GET", "https://example.com/api/users/7");
+            Check("Map Local folder refuses links to outside files", text.Trim() != "secret", text);
+            (st, text, _) = await Get("GET", "https://example.com/api/outside/secret.txt");
+            Check("Map Local folder refuses links to outside folders", text.Trim() != "secret", text);
+        }
+        catch (UnauthorizedAccessException) { Console.WriteLine("  (symlinks need developer mode on Windows — skipped)"); }
+        catch (IOException) { Console.WriteLine("  (symlinks not available here — skipped)"); }
+                rules.Rules.Remove(folder);
 
-        Check("Local network addresses", ProxyEngine.IsPrivate(IPAddress.Parse("192.168.1.5")) && ProxyEngine.IsPrivate(IPAddress.Parse("10.0.0.2"))
+        Check("Disguised localhost is recognised", ProxyEngine.IsLoopback("2130706433") && ProxyEngine.IsLoopback("::ffff:127.0.0.1") && ProxyEngine.IsLoopback("0x7f000001"));
+                Check("Local network addresses", ProxyEngine.IsPrivate(IPAddress.Parse("192.168.1.5")) && ProxyEngine.IsPrivate(IPAddress.Parse("10.0.0.2"))
               && !ProxyEngine.IsPrivate(IPAddress.Parse("8.8.8.8")));
         Check("Localhost is off limits for other devices", ProxyEngine.IsLoopback("127.0.0.1") && ProxyEngine.IsLoopback("localhost") && !ProxyEngine.IsLoopback("example.com"));
         Check("Fingerprint", engine.Fingerprint.Split(' ').Length == 32, engine.Fingerprint);

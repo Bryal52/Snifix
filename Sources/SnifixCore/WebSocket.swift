@@ -38,6 +38,12 @@ enum WebSocketBridge {
                     downstream.close(promise: nil)
                     return
                 }
+                if !client.isLocal && ProxyLimits.isLoopback(address: upstream.remoteAddress) {
+                    recorder?.fail(UpstreamError.blockedDestination.message)
+                    upstream.close(promise: nil)
+                    downstream.close(promise: nil)
+                    return
+                }
                 let promise = upstream.eventLoop.makePromise(of: ResponseData.self)
                 collector.begin(promise)
                 collector.onSwitchingProtocols = { h in

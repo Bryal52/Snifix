@@ -27,8 +27,10 @@ public sealed class ProxySettings
     public int MaxFlows { get; set; } = 20000;
     /// Who else on the network may use the proxy: "ask" for each new device, "always" on the local network, or "never".
     public string RemoteAccess { get; set; } = "ask";
-    /// Addresses of devices the user allowed.
+    /// Addresses of devices the user allowed. Locked while read or changed: proxy threads read it.
     public List<string> ApprovedClients { get; set; } = new();
+    /// When each address was allowed; after 30 days the device is asked about again.
+    public Dictionary<string, DateTime> ApprovedAt { get; set; } = new();
 }
 
 /// The proxy: decrypts HTTPS, applies the rules and reports every request as a Flow.
@@ -131,21 +133,44 @@ public sealed class ProxyEngine : IDisposable
         }
     }
 
-    public bool IsCertificateTrusted() =>
-        OperatingSystem.IsWindows() ? server.CertificateManager.IsRootCertificateUserTrusted() : false;
+    public bool IsCertificateTrusted()
+    {
+        if (!OperatingSystem.IsWindows()) return false;
+        using var store = new X509Store(StoreName.Root, StoreLocation.CurrentUser);
+        store.Open(OpenFlags.ReadOnly);
+        return store.Certificates.Find(X509FindType.FindByThumbprint, RootCertificate.Thumbprint, false).Count > 0;
+    }
 
-    /// Shows the Windows dialog that adds the Snifix root to the user's trusted roots.
+    /// Adds only the public certificate to the user's trusted roots (Windows asks to confirm).
+    /// The private key stays in the encrypted PFX and is never put into a Windows certificate store.
     public string? TrustCertificate()
     {
         if (!OperatingSystem.IsWindows()) return "Installing the certificate works on Windows only.";
         try
         {
-            CertificateManager.SuppressInteractiveRootStoreMutations = false;
-            server.CertificateManager.TrustRootCertificate(false);
+            using var store = new X509Store(StoreName.Root, StoreLocation.CurrentUser);
+            store.Open(OpenFlags.ReadWrite);
+            store.Add(X509CertificateLoader.LoadCertificate(RootCertificate.RawData));
             return IsCertificateTrusted() ? null : "Windows did not trust the certificate.";
         }
         catch (Exception ex) { return ex.Message; }
-        finally { CertificateManager.SuppressInteractiveRootStoreMutations = true; }
+    }
+
+    /// Removes this CA from the trusted roots and deletes its files; a new one is made at the next start.
+    public void ForgetCertificate()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            try
+            {
+                using var store = new X509Store(StoreName.Root, StoreLocation.CurrentUser);
+                store.Open(OpenFlags.ReadWrite);
+                foreach (var c in store.Certificates.Find(X509FindType.FindByThumbprint, RootCertificate.Thumbprint, false)) store.Remove(c);
+            }
+            catch { }
+        }
+        foreach (var name in new[] { "snifix-ca.pfx", "snifix-ca.key", "snifix-ca.pem" })
+            try { File.Delete(Path.Combine(DataDirectory, name)); } catch { }
     }
 
     public static string PrimaryAddress()
@@ -201,10 +226,20 @@ public sealed class ProxyEngine : IDisposable
                || (b[0] == 172 && b[1] >= 16 && b[1] <= 31) || (b[0] == 100 && b[1] >= 64 && b[1] <= 127);
     }
 
+    /// Whether the host leads to this computer's loopback: by name, by any way of writing the IP
+    /// (2130706433, 0x7f000001, ::ffff:127.0.0.1) or by what the name resolves to (127.0.0.1.nip.io).
     public static bool IsLoopback(string host)
     {
         var h = host.ToLowerInvariant().Trim('[', ']');
-        return h == "localhost" || h.EndsWith(".localhost") || h.StartsWith("127.") || h == "::1" || h == "0.0.0.0" || h == "::";
+        if (h == "localhost" || h.EndsWith(".localhost")) return true;
+        IPAddress[] addresses;
+        if (IPAddress.TryParse(h, out var literal)) addresses = new[] { literal };
+        else
+        {
+            try { addresses = Dns.GetHostAddresses(h); }
+            catch { return false; }
+        }
+        return addresses.Any(a => IPAddress.IsLoopback(a.IsIPv4MappedToIPv6 ? a.MapToIPv4() : a) || a.Equals(IPAddress.Any) || a.Equals(IPAddress.IPv6Any));
     }
 
     /// This computer always may; other devices must be on the local network and, in "ask" mode, allowed by the user.
@@ -218,7 +253,11 @@ public sealed class ProxyEngine : IDisposable
             case "always": return true;
             case "never": return false;
         }
-        if (Settings.ApprovedClients.Contains(address)) return true;
+        lock (Settings.ApprovedClients)
+        {
+            if (Settings.ApprovedClients.Contains(address)
+                && Settings.ApprovedAt.TryGetValue(address, out var at) && DateTime.UtcNow - at < TimeSpan.FromDays(30)) return true;
+        }
         bool first;
         lock (asked) { first = !denied.Contains(address) && asked.Add(address); }
         if (first) AccessRequested?.Invoke(address, Clients.DeviceName(e.HttpClient.Request.Headers.GetFirstHeader("User-Agent")?.Value));
@@ -707,12 +746,35 @@ static class MapLocal
         if (rest.Contains("..") || rest.Contains(':') || rest.Contains('\\') || System.IO.Path.IsPathRooted(rest)) return null;
         var root = System.IO.Path.GetFullPath(dir);
         var full = System.IO.Path.GetFullPath(rest.Length == 0 ? dir : System.IO.Path.Combine(dir, rest.Replace('/', System.IO.Path.DirectorySeparatorChar)));
-        // Absolute, drive or network paths from the URL must never leave the folder
-        if (full != root && !full.StartsWith(root.TrimEnd(System.IO.Path.DirectorySeparatorChar) + System.IO.Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) return null;
+        // Absolute, drive or network paths from the URL, links and junctions must never leave the folder
+        var realRoot = RealPath(root);
+        bool Inside(string p)
+        {
+            var real = RealPath(p);
+            return real.Equals(realRoot, StringComparison.OrdinalIgnoreCase)
+                   || real.StartsWith(realRoot.TrimEnd(System.IO.Path.DirectorySeparatorChar) + System.IO.Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+        }
+        if (!Inside(full)) return null;
         if (File.Exists(full)) return full;
         if (Directory.Exists(full))
-            return new[] { "index.json", "index.html" }.Select(i => System.IO.Path.Combine(full, i)).FirstOrDefault(File.Exists);
-        return new[] { "json", "html", "txt", "xml" }.Select(ext => full + "." + ext).FirstOrDefault(File.Exists);
+            return new[] { "index.json", "index.html" }.Select(i => System.IO.Path.Combine(full, i)).FirstOrDefault(p => File.Exists(p) && Inside(p));
+        return new[] { "json", "html", "txt", "xml" }.Select(ext => full + "." + ext).FirstOrDefault(p => File.Exists(p) && Inside(p));
+    }
+
+    /// The path with every symbolic link and junction on the way replaced by its target.
+    static string RealPath(string path)
+    {
+        var full = System.IO.Path.GetFullPath(path);
+        var root = System.IO.Path.GetPathRoot(full) ?? "";
+        var current = root;
+        foreach (var part in full[root.Length..].Split(System.IO.Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries))
+        {
+            current = System.IO.Path.Combine(current, part);
+            FileSystemInfo info = Directory.Exists(current) ? new DirectoryInfo(current) : new FileInfo(current);
+            if (info.Exists && info.LinkTarget != null && info.ResolveLinkTarget(true) is FileSystemInfo target)
+                current = System.IO.Path.GetFullPath(target.FullName);
+        }
+        return current;
     }
 
     static (int, List<HeaderItem>, byte[]) Missing(string path) =>

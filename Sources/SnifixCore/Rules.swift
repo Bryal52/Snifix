@@ -196,7 +196,14 @@ extension RuleMatcher {
         var target = request.url
         if !useRegex && !pattern.contains("?"), let q = target.firstIndex(of: "?") { target = String(target[..<q]) }
         guard let re = PatternCache.shared.regex(for: self) else { return false }
-        return re.firstMatch(in: target, range: NSRange(target.startIndex..., in: target)) != nil
+        // A slow pattern (e.g. from someone else's rules file) gives up after 50 ms instead of stalling requests
+        let deadline = Date().addingTimeInterval(0.05)
+        var found = false
+        re.enumerateMatches(in: target, options: [.reportProgress], range: NSRange(target.startIndex..., in: target)) { result, _, stop in
+            if result != nil { found = true; stop.pointee = true }
+            else if Date() > deadline { stop.pointee = true }
+        }
+        return found
     }
 }
 

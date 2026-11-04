@@ -20,8 +20,11 @@ final class UpstreamPool {
     private var h2: [String: H2Connection] = [:]
     private var connecting: [String: EventLoopFuture<Transport>] = [:]
 
-    init(eventLoop: EventLoop, engine: ProxyEngine) {
-        self.eventLoop = eventLoop; self.engine = engine
+    /// Requests of another device may not end up at this computer's loopback, however the host was written.
+    private let remoteClient: Bool
+
+    init(eventLoop: EventLoop, engine: ProxyEngine, remoteClient: Bool = false) {
+        self.eventLoop = eventLoop; self.engine = engine; self.remoteClient = remoteClient
     }
 
     func send(_ request: RequestData) -> EventLoopFuture<ResponseData> {
@@ -122,6 +125,13 @@ final class UpstreamPool {
                 case .failure(let error):
                     result.fail(error)
                 case .success(let channel):
+                    // Checked on the address actually connected to: names like 127.0.0.1.nip.io
+                    // or numbers like 2130706433 also land on loopback
+                    if self.remoteClient && ProxyLimits.isLoopback(address: channel.remoteAddress) {
+                        result.fail(UpstreamError.blockedDestination)
+                        channel.close(promise: nil)
+                        return
+                    }
                     if !tls {
                         do { result.succeed(.h1(try addHTTP1(channel))) } catch { result.fail(error) }
                     }

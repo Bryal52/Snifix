@@ -252,6 +252,24 @@ public sealed class DevicesWindow : Window
         if (!trusted) p.Children.Add(Ui.Button("Install Certificate…", () => state.TrustCertificate(), gold: true));
         p.Children.Add(Ui.Check("Capture this PC's traffic at launch (when the certificate is trusted)", state.Settings.CaptureOnLaunch,
             v => { state.Settings.CaptureOnLaunch = v; state.SaveSettings(); }));
+        p.Children.Add(Ui.Text("Fingerprint (SHA-256): " + state.Engine.Fingerprint, 10.5, "#8D879C"));
+        var replace = Ui.Button("Replace Certificate…", async () =>
+        {
+            var ok = false;
+            var dialog = new Window { Title = "Replace the Snifix certificate?", Width = 500, SizeToContent = SizeToContent.Height, CanResize = false,
+                                      WindowStartupLocation = WindowStartupLocation.CenterOwner };
+            var body = Ui.Column(14);
+            body.Margin = new Thickness(20);
+            body.Children.Add(new TextBlock { Text = "Replace the Snifix certificate?", FontSize = 16, FontWeight = FontWeight.SemiBold });
+            body.Children.Add(Ui.Text("Snifix makes a new certificate and key and restarts. Every phone and this PC must then install and trust the new certificate again; the old one stops working.", 12.5, "#B9B5C6"));
+            var row = Ui.Row(Ui.Button("Cancel", () => dialog.Close()), Ui.Button("Replace and Restart", () => { ok = true; dialog.Close(); }, gold: true));
+            row.HorizontalAlignment = HorizontalAlignment.Right;
+            body.Children.Add(row);
+            dialog.Content = body;
+            await dialog.ShowDialog(this);
+            if (ok) state.ReplaceCertificate();
+        });
+        p.Children.Add(replace);
         p.Children.Add(Ui.Label("Other devices on the network"));
         p.Children.Add(Ui.Combo(new[] { ("Ask for each new device", "ask"), ("Allow every device on the local network", "always"), ("Nobody — only this PC", "never") },
             state.Settings.RemoteAccess, v => { state.Settings.RemoteAccess = v; state.SaveSettings(); }));
@@ -290,6 +308,7 @@ public sealed class DevicesWindow : Window
             ? "Wi-Fi → your network → ✎ / Advanced → Proxy → Proxy Auto-Config, PAC URL:"
             : "Settings → Wi-Fi → (i) → Configure Proxy → Automatic, URL:"));
         steps.Children.Add(CopyField(state.PacUrl));
+        steps.Children.Add(Ui.Text($"On public or office Wi-Fi set the proxy manually instead — server {state.LocalAddress}, port {state.Settings.Port}: the automatic setting comes over plain Wi-Fi and could be faked there.", 11, "#FF9A1F"));
         if (android) steps.Children.Add(Ui.Text($"Or Manual: host {state.LocalAddress}, port {state.Settings.Port} — then switch it back to None when Snifix is not running.", 11, "#8D879C"));
         steps.Children.Add(Step(3, android
             ? "Scan the QR code (or open http://snifix.cert in Chrome on the phone) and download the certificate. Then Settings → Security → Encryption & credentials → Install a certificate → CA certificate."

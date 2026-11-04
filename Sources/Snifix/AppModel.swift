@@ -768,6 +768,7 @@ final class AppModel {
     func allowDevice(_ address: String) {
         var s = settings
         if !s.approvedClients.contains(address) { s.approvedClients.append(address) }
+        s.approvedAt[address] = Date()
         settings = s
         engine.forgetClient(address)
         withAnimation(.spring(response: 0.45, dampingFraction: 0.8)) { _ = accessRequests.removeValue(forKey: address) }
@@ -783,8 +784,32 @@ final class AppModel {
     func removeApprovedDevice(_ address: String) {
         var s = settings
         s.approvedClients.removeAll { $0 == address }
+        s.approvedAt[address] = nil
         settings = s
         engine.forgetClient(address)
+    }
+
+    /// A new CA and key, e.g. after the old key might have been copied (it used to be a plain file, backups keep it).
+    func replaceCertificate() {
+        let alert = NSAlert()
+        alert.messageText = "Replace the Snifix certificate?"
+        alert.informativeText = "Snifix makes a new certificate and key and restarts. Every iPhone, Android and this Mac must then install and trust the new certificate again; the old one stops working. Remove the old Snifix CA profile from your phones."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Replace and Restart")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        if systemProxyEnabled { systemProxy.disable() }
+        CertificateTrust.remove(ca.certificateDER)
+        KeychainKeyProtector().delete()
+        for name in ["snifix-ca.pem", "snifix-ca-key.sealed", "snifix-ca-key.pem"] {
+            try? FileManager.default.removeItem(at: supportDirectory.appendingPathComponent(name))
+        }
+        // Start a fresh copy once this one has quit, so the new CA is created on launch
+        let relaunch = Process()
+        relaunch.executableURL = URL(fileURLWithPath: "/bin/sh")
+        relaunch.arguments = ["-c", "sleep 1; /usr/bin/open \"$0\"", Bundle.main.bundlePath]
+        try? relaunch.run()
+        NSApp.terminate(nil)
     }
 
     /// The CA key is encrypted with a key from the Keychain. If macOS does not give it out, Snifix must not

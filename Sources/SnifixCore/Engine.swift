@@ -21,6 +21,10 @@ public struct ProxySettings: Codable, Sendable, Equatable {
     public var remoteAccess: RemoteAccess = .ask
     /// Addresses of devices the user allowed.
     public var approvedClients: [String] = []
+    /// When each address was allowed; after 30 days the device is asked about again
+    /// (another device may have got the same address from the router by then).
+    public var approvedAt: [String: Date] = [:]
+    public static let approvalLifetime: TimeInterval = 30 * 86400
     public init() {}
 
     public enum RemoteAccess: String, Codable, CaseIterable, Sendable { case ask, always, never }
@@ -41,6 +45,7 @@ public struct ProxySettings: Codable, Sendable, Equatable {
         http2 = try c.decodeIfPresent(Bool.self, forKey: .http2) ?? d.http2
         remoteAccess = try c.decodeIfPresent(RemoteAccess.self, forKey: .remoteAccess) ?? d.remoteAccess
         approvedClients = try c.decodeIfPresent([String].self, forKey: .approvedClients) ?? d.approvedClients
+        approvedAt = try c.decodeIfPresent([String: Date].self, forKey: .approvedAt) ?? [:]
     }
 }
 
@@ -162,7 +167,8 @@ public final class ProxyEngine: @unchecked Sendable {
         case .always: return true
         case .never: return false
         case .ask:
-            if s.approvedClients.contains(client.address) { return true }
+            if s.approvedClients.contains(client.address),
+               Date().timeIntervalSince(s.approvedAt[client.address] ?? .distantPast) < ProxySettings.approvalLifetime { return true }
             let first = access.withLockedValue { a -> Bool in
                 if a.denied.contains(client.address) || a.asked.contains(client.address) { return false }
                 a.asked.insert(client.address)
@@ -422,11 +428,13 @@ enum UpstreamError: Error {
     case closed(beforeResponse: Bool)
     case timeout
     case tooLarge
+    case blockedDestination
     var message: String {
         switch self {
         case .closed: return "The server closed the connection without a response"
         case .timeout: return "The server did not respond within 120 seconds"
         case .tooLarge: return "The response is larger than 256 MB — Snifix does not keep bodies this big"
+        case .blockedDestination: return "Other devices cannot reach this computer's localhost"
         }
     }
 }
@@ -447,6 +455,11 @@ enum ProxyLimits {
     static func isLoopback(_ host: String) -> Bool {
         let h = host.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
         return h == "localhost" || h.hasSuffix(".localhost") || h.hasPrefix("127.") || h == "::1" || h == "0.0.0.0" || h == "::"
+    }
+
+    static func isLoopback(address: SocketAddress?) -> Bool {
+        guard let ip = address?.ipAddress?.lowercased() else { return false }
+        return ip.hasPrefix("127.") || ip == "::1" || ip.hasPrefix("::ffff:127.") || ip == "0.0.0.0" || ip == "::"
     }
 
     static func refusal(_ message: String, status: Int = 403) -> ResponseData {

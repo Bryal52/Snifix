@@ -19,7 +19,7 @@ enum ProxyPipeline {
     /// Decrypted tunnel: after the TLS handshake the client picks HTTP/2 or HTTP/1.1 (ALPN).
     static func installNegotiated(on channel: Channel, engine: ProxyEngine, target: (host: String, port: Int), client: ClientInfo) throws {
         // Requests of one tunnel share upstream connections, also across HTTP/2 streams
-        let pool = UpstreamPool(eventLoop: channel.eventLoop, engine: engine)
+        let pool = UpstreamPool(eventLoop: channel.eventLoop, engine: engine, remoteClient: !client.isLocal)
         channel.closeFuture.whenComplete { _ in pool.closeAll() }
         try channel.pipeline.syncOperations.addHandler(ApplicationProtocolNegotiationHandler { alpn, channel in
             if case .negotiated("h2") = alpn {
@@ -68,7 +68,7 @@ final class ExchangeHandler: ChannelInboundHandler, RemovableChannelHandler {
 
     func handlerAdded(context: ChannelHandlerContext) {
         self.context = context
-        if pool == nil { pool = UpstreamPool(eventLoop: context.eventLoop, engine: engine) }
+        if pool == nil { pool = UpstreamPool(eventLoop: context.eventLoop, engine: engine, remoteClient: !client.isLocal) }
     }
 
     func handlerRemoved(context: ChannelHandlerContext) { self.context = nil }
@@ -326,6 +326,12 @@ final class TunnelSniffer: ChannelInboundHandler, RemovableChannelHandler {
                     recorder?.fail(ProxyErrors.describe(error))
                     channel.close(promise: nil)
                 case .success(let upstream):
+                    if !client.isLocal && ProxyLimits.isLoopback(address: upstream.remoteAddress) {
+                        recorder?.fail(UpstreamError.blockedDestination.message)
+                        upstream.close(promise: nil)
+                        channel.close(promise: nil)
+                        return
+                    }
                     let toServer = RelayHandler(peer: upstream) { n in recorder?.update { $0.tunnelBytesUp += n } }
                     let toClient = RelayHandler(peer: channel) { n in recorder?.update { $0.tunnelBytesDown += n } }
                     toClient.onClose = { recorder?.update { $0.completedAt = Date() } }

@@ -156,7 +156,9 @@ if lan != "127.0.0.1" && NetworkInfo.isPrivate(lan) {
     check("Unknown device is refused", !engine.allowsForTest(remote))
     Thread.sleep(forTimeInterval: 0.1)
     check("User is asked about it", asked.contains("192.168.77.7"))
-    s2.approvedClients = ["192.168.77.7"]; engine.settings = s2
+    s2.approvedClients = ["192.168.77.7"]; s2.approvedAt = ["192.168.77.7": Date().addingTimeInterval(-40 * 86400)]; engine.settings = s2
+    check("An approval older than 30 days asks again", !engine.allowsForTest(remote))
+    s2.approvedAt = ["192.168.77.7": Date()]; engine.settings = s2
     check("Allowed device passes", engine.allowsForTest(remote))
     check("Internet address never passes", !engine.allowsForTest(ClientInfo(address: "8.8.8.8", port: 1, isLocal: false)))
     s2.remoteAccess = .never; engine.settings = s2
@@ -164,6 +166,21 @@ if lan != "127.0.0.1" && NetworkInfo.isPrivate(lan) {
     s2.remoteAccess = .always; engine.settings = s2
 }
 check("Localhost is off limits for other devices", ProxyLimitsForTest.isLoopback("127.0.0.1") && ProxyLimitsForTest.isLoopback("localhost") && !ProxyLimitsForTest.isLoopback("192.168.1.5"))
+// 2130706433 is 127.0.0.1 written as one number: the check must look at where the connection really goes
+let disguised = RequestData(method: "GET", scheme: "http", host: "2130706433", port: 19090, path: "/proxy.pac", headers: [], body: Data())
+let blocked = await engine.sendForTest(disguised, remoteClient: true)
+check("Disguised localhost is blocked for other devices", blocked?.contains("localhost") == true, blocked ?? "went through")
+let fromHere = await engine.sendForTest(disguised, remoteClient: false)
+check("This computer still reaches its own localhost", fromHere == nil, fromHere ?? "")
+
+// A catastrophic regex gives up instead of hanging
+var slow = RuleMatcher(pattern: "^(a+)+$", useRegex: true)
+slow.includeSubpaths = false
+let evil = RequestData(method: "GET", scheme: "https", host: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.example", port: 443,
+                       path: "/" + String(repeating: "a", count: 60) + "!", headers: [], body: Data())
+let regexStart = Date()
+_ = slow.matches(evil)
+check("Slow regex stops within a moment", Date().timeIntervalSince(regexStart) < 1, "\(Date().timeIntervalSince(regexStart))s")
 
 // Map Local from a folder: nothing outside the folder
 let mocks = dir.appendingPathComponent("mocks")
@@ -171,6 +188,7 @@ try FileManager.default.createDirectory(at: mocks.appendingPathComponent("users"
 try Data(#"{"id":42}"#.utf8).write(to: mocks.appendingPathComponent("users/42.json"))
 try Data("secret".utf8).write(to: dir.appendingPathComponent("secret.txt"))
 try? FileManager.default.createSymbolicLink(at: mocks.appendingPathComponent("link"), withDestinationURL: dir.appendingPathComponent("secret.txt"))
+try? FileManager.default.createSymbolicLink(at: mocks.appendingPathComponent("users/7.json"), withDestinationURL: dir.appendingPathComponent("secret.txt"))
 var folder = Rule(name: "Folder", kind: .mapLocal, matcher: RuleMatcher(pattern: "https://example.com/api/*"))
 folder.mapLocal.source = .directory
 folder.mapLocal.path = mocks.path
@@ -181,6 +199,8 @@ check("Map Local folder serves its files", out.contains(#""id":42"#), out)
 check("Map Local folder blocks ..", !out.contains("secret") || out.contains("not found"), out)
 (out, _) = curl(["https://example.com/api/link"])
 check("Map Local folder blocks symlinks out", !out.contains("\r\n\r\nsecret"), out)
+(out, _) = curl(["https://example.com/api/users/7"])
+check("Map Local folder blocks symlinks it would add .json to", !out.contains("\r\n\r\nsecret"), out)
 engine.rules.rules.removeAll { $0.name == "Folder" }
 
 // A script stuck in a loop is stopped instead of hanging requests
@@ -197,6 +217,9 @@ let sealedSession = try PasswordSeal.seal(Data("tokens".utf8), password: "qwerty
 check("Session encrypted", PasswordSeal.isSealed(sealedSession) && !String(decoding: sealedSession, as: UTF8.self).contains("tokens"))
 check("Session opens with the password", (try? PasswordSeal.open(sealedSession, password: "qwerty")) == Data("tokens".utf8))
 check("Wrong password fails", (try? PasswordSeal.open(sealedSession, password: "nope")) == nil)
+var crafted = sealedSession
+crafted.replaceSubrange(26..<30, with: [0, 0, 0, 0])
+check("A crafted session file is refused, not a crash", (try? PasswordSeal.open(crafted, password: "qwerty")) == nil)
 struct TestProtector: KeyProtector {
     func seal(_ plain: Data) throws -> Data { Data(plain.map { $0 ^ 0x5A }) }
     func open(_ sealed: Data) throws -> Data { Data(sealed.map { $0 ^ 0x5A }) }
